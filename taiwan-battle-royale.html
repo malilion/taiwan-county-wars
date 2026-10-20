@@ -1,0 +1,414 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>台灣 22 縣市大亂鬥</title>
+<style>
+  :root {
+    --bg: #0d1628; --panel: #15223d; --panel2: #1d2e50; --line: #2c4270;
+    --text: #e9eef8; --muted: #8fa2c6; --accent: #ffd166; --red: #ef476f; --green: #06d6a0;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; }
+  body {
+    background: var(--bg); color: var(--text);
+    font-family: "PingFang TC", "Noto Sans TC", "Microsoft JhengHei", system-ui, sans-serif;
+    display: flex; flex-direction: column;
+  }
+  header { display: flex; align-items: center; gap: 14px; padding: 10px 16px; border-bottom: 1px solid var(--line); flex-wrap: wrap; }
+  header h1 { margin: 0; font-size: 22px; font-weight: 900; }
+  header .round { color: var(--accent); font-weight: 700; }
+  main { flex: 1; display: flex; min-height: 0; }
+  #mapWrap {
+    flex: 1; min-width: 0; display: flex; align-items: center; justify-content: center; padding: 12px;
+    background: radial-gradient(ellipse at 60% 40%, #17345f 0%, #0f2240 55%, var(--bg) 100%);
+  }
+  #map { width: 100%; height: 100%; max-height: calc(100vh - 70px); }
+  aside { width: 380px; flex-shrink: 0; padding: 12px; display: flex; flex-direction: column; gap: 10px; border-left: 1px solid var(--line); overflow-y: auto; }
+  .card { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 12px; }
+  .card h3 { margin: 0 0 8px; font-size: 14px; color: var(--muted); }
+  button {
+    font: inherit; color: var(--text); background: var(--panel2); border: 1px solid var(--line);
+    border-radius: 8px; padding: 8px 12px; cursor: pointer;
+  }
+  button:hover:not(:disabled) { border-color: var(--accent); }
+  button:disabled { opacity: .45; cursor: default; }
+  button.primary { background: #e85d04; border-color: #ff8c42; font-weight: 700; }
+  button.on { background: var(--accent); color: #111; }
+  .ctrls { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 8px; }
+  .opts { display: flex; justify-content: space-between; align-items: center; margin-top: 10px; font-size: 13px; color: var(--muted); gap: 8px; flex-wrap: wrap; }
+  .opts input[type=range] { width: 110px; }
+  #board { display: flex; flex-direction: column; gap: 3px; max-height: 260px; overflow-y: auto; }
+  .row { display: flex; align-items: center; gap: 8px; font-size: 13px; padding: 4px 6px; border-radius: 6px; }
+  .row .rk { width: 18px; color: var(--muted); }
+  .row .sw { width: 12px; height: 12px; border-radius: 3px; flex-shrink: 0; }
+  .row .nm { font-weight: 700; width: 48px; }
+  .row .ts { flex: 1; color: var(--muted); font-size: 12px; }
+  .row .ct { color: var(--accent); white-space: nowrap; }
+  .logcard { flex: 1; min-height: 220px; display: flex; flex-direction: column; }
+  #log { overflow-y: auto; font-size: 13px; line-height: 1.55; flex: 1; max-height: 420px; }
+  .entry { padding: 5px 0; border-bottom: 1px solid rgba(255,255,255,.06); }
+  .entry .r { color: var(--muted); font-size: 11px; margin-right: 4px; }
+  .entry.event { color: #a0e7ff; }
+  .entry.big { color: var(--accent); font-weight: 700; }
+  .entry .quip { display: block; color: var(--muted); font-size: 12px; }
+  .ftag { font-weight: 700; }
+
+  .hex { stroke: #0d1628; stroke-width: 2.5; transition: fill .5s; cursor: default; }
+  .hex.atk { animation: flashA .5s 3; }
+  .hex.def { animation: flashD .5s 3; }
+  @keyframes flashA { 50% { fill-opacity: .55; } }
+  @keyframes flashD { 50% { fill-opacity: .35; } }
+  .lbl { text-anchor: middle; pointer-events: none; font-weight: 900; paint-order: stroke; stroke: rgba(0,0,0,.6); stroke-width: 3px; fill: #fff; }
+  .lbl.name { font-size: 15px; }
+  .lbl.owner { font-size: 10px; font-weight: 700; }
+  .sea { stroke: #6f8fc4; stroke-dasharray: 4 5; stroke-width: 1.5; opacity: .55; }
+  .arrow { fill: none; stroke-width: 6; stroke-linecap: round; stroke-dasharray: 10 7; animation: dash .45s linear infinite; }
+  @keyframes dash { to { stroke-dashoffset: -17; } }
+  .islandNote { fill: var(--muted); font-size: 11px; }
+
+  #banner {
+    position: fixed; inset: 0; display: flex; align-items: center; justify-content: center;
+    background: rgba(5, 10, 20, .75); z-index: 5;
+  }
+  #banner[hidden] { display: none; }
+  #banner .box { background: var(--panel); border: 1px solid var(--line); border-radius: 16px; padding: 28px 36px; text-align: center; }
+  #banner h2 { margin: 0 0 8px; font-size: 34px; }
+  #banner p { color: var(--muted); margin: 0 0 16px; }
+
+  @media (max-width: 860px) {
+    main { flex-direction: column; }
+    #mapWrap { height: 70vh; flex: none; }
+    aside { width: 100%; border-left: 0; overflow: visible; }
+  }
+</style>
+</head>
+<body>
+<header>
+  <h1>🇹🇼 台灣 22 縣市大亂鬥</h1>
+  <span class="round" id="roundTxt">第 0 回合</span>
+  <span id="aliveTxt"></span>
+</header>
+<main>
+  <section id="mapWrap"><svg id="map" role="img" aria-label="台灣縣市六角格地圖"></svg></section>
+  <aside>
+    <div class="card">
+      <div class="ctrls">
+        <button id="stepBtn" class="primary">⏭ 單步執行</button>
+        <button id="autoBtn">▶ 自動播放</button>
+        <button id="resetBtn">↺ 重置</button>
+      </div>
+      <div class="opts">
+        <label><input type="checkbox" id="weighted" checked> 勝率依領土數微調</label>
+        <label>速度 <input type="range" id="speed" min="1" max="10" value="5"></label>
+      </div>
+    </div>
+    <div class="card">
+      <h3 id="boardTitle">存活縣市排行榜</h3>
+      <div id="board"></div>
+    </div>
+    <div class="card logcard">
+      <h3>📢 戰況播報</h3>
+      <div id="log"></div>
+    </div>
+  </aside>
+</main>
+<div id="banner" hidden>
+  <div class="box">
+    <h2 id="bannerTitle"></h2>
+    <p id="bannerText"></p>
+    <button id="bannerReset" class="primary">再來一場</button>
+  </div>
+</div>
+
+<script>
+// ─────────────── 縣市資料 ───────────────
+// hexes：六角格座標 [row, col]（odd-r 排列，依相對地理位置擺放）
+const COUNTIES = [
+  { id: 'keelung',       name: '基隆市', short: '基隆', color: '#4361EE', hexes: [[0, 5]] },
+  { id: 'taipei',        name: '臺北市', short: '台北', color: '#E63946', hexes: [[0, 4]] },
+  { id: 'newtaipei',     name: '新北市', short: '新北', color: '#F4A261', hexes: [[1, 4], [1, 5]] },
+  { id: 'taoyuan',       name: '桃園市', short: '桃園', color: '#2A9D8F', hexes: [[1, 3]] },
+  { id: 'hsinchucounty', name: '新竹縣', short: '竹縣', color: '#8AB17D', hexes: [[2, 3]] },
+  { id: 'hsinchucity',   name: '新竹市', short: '竹市', color: '#00B4D8', hexes: [[2, 2]] },
+  { id: 'miaoli',        name: '苗栗縣', short: '苗栗', color: '#B5838D', hexes: [[3, 2]] },
+  { id: 'taichung',      name: '臺中市', short: '台中', color: '#7B2CBF', hexes: [[3, 3]] },
+  { id: 'changhua',      name: '彰化縣', short: '彰化', color: '#E9C46A', hexes: [[4, 3]] },
+  { id: 'nantou',        name: '南投縣', short: '南投', color: '#2D6A4F', hexes: [[4, 4]] },
+  { id: 'yunlin',        name: '雲林縣', short: '雲林', color: '#A7C957', hexes: [[5, 3]] },
+  { id: 'chiayicounty',  name: '嘉義縣', short: '嘉縣', color: '#BC6C25', hexes: [[5, 4], [6, 5]] },
+  { id: 'chiayicity',    name: '嘉義市', short: '嘉市', color: '#FF6B9A', hexes: [[6, 4]] },
+  { id: 'tainan',        name: '臺南市', short: '台南', color: '#9D0208', hexes: [[6, 3]] },
+  { id: 'kaohsiung',     name: '高雄市', short: '高雄', color: '#0077B6', hexes: [[7, 3], [7, 4]] },
+  { id: 'pingtung',      name: '屏東縣', short: '屏東', color: '#FB8500', hexes: [[8, 4], [9, 4]] },
+  { id: 'yilan',         name: '宜蘭縣', short: '宜蘭', color: '#6A4C93', hexes: [[2, 4], [2, 5]] },
+  { id: 'hualien',       name: '花蓮縣', short: '花蓮', color: '#06D6A0', hexes: [[3, 4], [4, 5], [5, 5]] },
+  { id: 'taitung',       name: '臺東縣', short: '台東', color: '#FFB703', hexes: [[7, 5], [8, 5]] },
+  { id: 'penghu',        name: '澎湖縣', short: '澎湖', color: '#8D99AE', hexes: [[6, 1]], island: true },
+  { id: 'kinmen',        name: '金門縣', short: '金門', color: '#6D597A', hexes: [[3, 0]], island: true },
+  { id: 'lienchiang',    name: '連江縣', short: '馬祖', color: '#A0C4FF', hexes: [[0, 0]], island: true },
+];
+
+// 陸地相鄰（雙向，寫一邊即可）
+const LAND_ADJ = {
+  keelung: ['newtaipei'],
+  taipei: ['newtaipei'],
+  newtaipei: ['taoyuan', 'yilan'],
+  taoyuan: ['hsinchucounty', 'yilan'],
+  hsinchucounty: ['hsinchucity', 'miaoli', 'taichung', 'yilan'],
+  hsinchucity: ['miaoli'],
+  miaoli: ['taichung'],
+  taichung: ['changhua', 'nantou', 'hualien', 'yilan'],
+  changhua: ['nantou', 'yunlin'],
+  nantou: ['yunlin', 'chiayicounty', 'kaohsiung', 'hualien'],
+  yunlin: ['chiayicounty'],
+  chiayicounty: ['chiayicity', 'tainan', 'kaohsiung'],
+  tainan: ['kaohsiung'],
+  kaohsiung: ['pingtung', 'taitung', 'hualien'],
+  pingtung: ['taitung'],
+  yilan: ['hualien'],
+  hualien: ['taitung'],
+};
+// 海路：離島只能連到有港口的縣市（基隆、台中、嘉義縣布袋港、台南安平港、高雄）
+const SEA_ADJ = {
+  penghu: ['chiayicounty', 'tainan', 'kaohsiung'],
+  kinmen: ['taichung', 'kaohsiung'],
+  lienchiang: ['keelung', 'taichung'],
+};
+
+const byId = Object.fromEntries(COUNTIES.map(c => [c.id, c]));
+const ADJ = Object.fromEntries(COUNTIES.map(c => [c.id, new Set()]));
+for (const table of [LAND_ADJ, SEA_ADJ]) {
+  for (const [a, list] of Object.entries(table)) for (const b of list) { ADJ[a].add(b); ADJ[b].add(a); }
+}
+
+// ─────────────── 台灣在地事件（20% 機率） ───────────────
+// when(A, D)：A / D 為攻守雙方勢力 id；effect：'cancel' 行動取消、'defend' 防守成功、或勝率加減
+const owns = (f, id) => state.owner[id] === f;
+const EVENTS = [
+  { when: A => owns(A, 'taichung'), text: '🔫 台中啟動慶記支援，攻擊力提升！', effect: +0.2 },
+  { when: () => true, text: '🌧️ 台北下起暴雨，捷運進水，行動取消。', effect: 'cancel' },
+  { when: (A, D) => owns(D, 'tainan'), text: '🧋 台南全糖護盾生效，防禦成功！', effect: 'defend' },
+  { when: (A, D) => owns(D, 'miaoli') && !state.miaoliUsed, text: '🛂 苗栗國啟動邊境結界，免疫攻擊一次！', effect: 'cancel', once: 'miaoliUsed' },
+  { when: A => owns(A, 'kaohsiung'), text: '💰 高雄發大財，軍費暴增，攻擊力提升！', effect: +0.15 },
+  { when: (A, D) => owns(A, 'yilan') || owns(D, 'yilan'), text: '🚗 雪隧大塞車，部隊卡在坪林，行動取消。', effect: 'cancel' },
+  { when: (A, D) => owns(D, 'kinmen'), text: '🍶 守軍喝了金門高粱，站都站不穩！', effect: +0.2 },
+  { when: A => owns(A, 'hsinchucity'), text: '🌬️ 新竹九降風太強，攻方被吹回去了。', effect: -0.2 },
+  { when: A => owns(A, 'chiayicity'), text: '🍗 嘉義火雞肉飯加持，士氣大振！', effect: +0.15 },
+  { when: () => true, text: '🌀 颱風來襲，全台放颱風假，今天不打仗。', effect: 'cancel' },
+  { when: (A, D) => owns(D, 'penghu'), text: '🎆 澎湖花火節開幕，守軍看煙火看到忘記防守！', effect: +0.15 },
+  { when: A => owns(A, 'hualien'), text: '🪨 蘇花公路落石，攻勢受阻。', effect: -0.15 },
+  { when: () => true, text: '🛵 機車大軍出動，待轉格塞爆，攻方衝勁 +10%。', effect: +0.1 },
+  { when: (A, D) => owns(D, 'changhua'), text: '🥟 彰化肉圓防線：守軍吃飽了，防禦力上升！', effect: -0.15 },
+  { when: A => owns(A, 'taipei'), text: '🏙️ 天龍國發動空投（其實是外送），攻擊力提升！', effect: +0.1 },
+  { when: (A, D) => owns(D, 'nantou'), text: '⛰️ 南投山路十八彎，攻方迷路了。', effect: -0.15 },
+];
+
+// ─────────────── 旁白 ───────────────
+const WIN_QUIPS = [
+  '居民表示：只要珍奶不漲價，誰管都可以。',
+  '{D} 縣長已讀不回，據說正在搭客運逃離。',
+  '地方媽媽：垃圾車有準時來就好。',
+  '{D} 名產即日起改掛 {A} 招牌販售。',
+  '網友留言：「早就知道了，{D} 根本是 {A} 的後花園。」',
+  '{D} 的網紅連夜開直播哭了三小時。',
+  '路邊阿伯：「我年輕的時候 {A} 還沒那麼大咧。」',
+  '{A} 宣布全境請喝飲料，手搖店大排長龍。',
+];
+const LOSE_QUIPS = [
+  '{A} 軍摸摸鼻子回家，順便買了伴手禮。',
+  '{D} 守軍表示：今天只是熱身。',
+  '{A} 指揮官：「是導航害的。」',
+  '{D} 居民放鞭炮慶祝，被開罰噪音。',
+];
+
+// ─────────────── 狀態 ───────────────
+let state;
+let autoTimer = null;
+
+function reset() {
+  stopAuto();
+  state = {
+    round: 0,
+    owner: Object.fromEntries(COUNTIES.map(c => [c.id, c.id])),
+    miaoliUsed: false,
+    over: false,
+  };
+  document.getElementById('log').innerHTML = '';
+  document.getElementById('banner').hidden = true;
+  log('📣 22 縣市大亂鬥開打！最後只能留下一個。按「單步執行」或「自動播放」開始。', 'big');
+  render();
+}
+
+const alive = () => [...new Set(Object.values(state.owner))];
+const territories = f => COUNTIES.filter(c => state.owner[c.id] === f).map(c => c.id);
+const pick = arr => arr[Math.floor(Math.random() * arr.length)];
+const fTag = f => `<span class="ftag" style="color:${byId[f].color}">${byId[f].short}</span>`;
+const fill = (tpl, A, D) => tpl.replaceAll('{A}', byId[A].short).replaceAll('{D}', byId[D].short);
+
+// ─────────────── 一回合 ───────────────
+function step() {
+  if (state.over) return;
+  state.round++;
+
+  // 1. 隨機抽一個「有敵對鄰居」的存活勢力當攻方
+  const candidates = alive().filter(f => territories(f).some(id => [...ADJ[id]].some(n => state.owner[n] !== f)));
+  const A = pick(candidates);
+  // 2. 從攻方領土的敵對鄰居中隨機抽一塊當戰場
+  const fronts = [];
+  for (const id of territories(A)) for (const n of ADJ[id]) if (state.owner[n] !== A) fronts.push([id, n]);
+  const [fromId, toId] = pick(fronts);
+  const D = state.owner[toId];
+
+  // 3. 勝率：純 50/50 或依領土數微調
+  const nA = territories(A).length, nD = territories(D).length;
+  let p = document.getElementById('weighted').checked ? 0.5 + (nA - nD) * 0.03 : 0.5;
+
+  // 4. 20% 機率觸發在地事件
+  let forced = null;
+  if (Math.random() < 0.2) {
+    const ev = pick(EVENTS.filter(e => e.when(A, D)));
+    log(`<span class="r">R${state.round}</span>${ev.text}`, 'event');
+    if (ev.once) state[ev.once] = true;
+    if (ev.effect === 'cancel') { flash(fromId, toId, A); render(); return; }
+    if (ev.effect === 'defend') forced = false;
+    else p += ev.effect;
+  }
+  p = Math.min(0.85, Math.max(0.15, p));
+
+  const win = forced ?? Math.random() < p;
+  const via = SEA_ADJ[fromId]?.includes(toId) || SEA_ADJ[toId]?.includes(fromId) ? '渡海' : '';
+  if (win) {
+    const lost = territories(D);
+    lost.forEach(id => { state.owner[id] = A; });
+    log(`<span class="r">R${state.round}</span>⚔️ ${fTag(A)} 從 ${byId[fromId].short} ${via}出兵攻破 ${byId[toId].short}，
+      ${fTag(D)} 勢力（${lost.length} 塊領土）全數併入！（勝率 ${Math.round(p * 100)}%）
+      <span class="quip">${fill(pick(WIN_QUIPS), A, D)}</span>`);
+    if (alive().length === 1) finish(A);
+    else log(`💀 ${byId[D].short} 出局，剩 ${alive().length} 個縣市勢力。`, 'big');
+  } else {
+    log(`<span class="r">R${state.round}</span>🛡️ ${fTag(D)} 在 ${byId[toId].short} 擋下了 ${fTag(A)} 的${via}進攻！（攻方勝率 ${Math.round(p * 100)}%）
+      <span class="quip">${fill(pick(LOSE_QUIPS), A, D)}</span>`);
+  }
+  render();
+  flash(fromId, toId, A);
+}
+
+function finish(w) {
+  state.over = true;
+  stopAuto();
+  log(`👑 ${fTag(w)} 在第 ${state.round} 回合統一全台！`, 'big');
+  document.getElementById('bannerTitle').innerHTML = `👑 ${byId[w].name} 統一台灣！`;
+  document.getElementById('bannerTitle').style.color = byId[w].color;
+  document.getElementById('bannerText').textContent = `共歷時 ${state.round} 回合。全台改用 ${byId[w].short} 的垃圾車音樂。`;
+  document.getElementById('banner').hidden = false;
+}
+
+// ─────────────── 自動播放 ───────────────
+function delay() { return 1400 / Number(document.getElementById('speed').value); }
+function tick() { step(); if (!state.over) autoTimer = setTimeout(tick, delay()); }
+function startAuto() { if (state.over) return; autoTimer = setTimeout(tick, 0); updateButtons(); }
+function stopAuto() { clearTimeout(autoTimer); autoTimer = null; updateButtons(); }
+function updateButtons() {
+  const b = document.getElementById('autoBtn');
+  b.textContent = autoTimer ? '⏸ 暫停' : '▶ 自動播放';
+  b.classList.toggle('on', !!autoTimer);
+  b.disabled = !!state?.over;
+  document.getElementById('stepBtn').disabled = !!state?.over || !!autoTimer;
+}
+
+// ─────────────── 地圖 ───────────────
+const NS = 'http://www.w3.org/2000/svg';
+const R = 34, HW = Math.sqrt(3) * R, PAD = 30;
+const hexCenter = ([row, col]) => [PAD + HW / 2 + col * HW + (row % 2 ? HW / 2 : 0), PAD + R + row * R * 1.5];
+const hexPoints = ([cx, cy]) => Array.from({ length: 6 }, (_, i) => {
+  const a = Math.PI / 180 * (60 * i - 30);
+  return `${(cx + (R - 1) * Math.cos(a)).toFixed(1)},${(cy + (R - 1) * Math.sin(a)).toFixed(1)}`;
+}).join(' ');
+const svg = document.getElementById('map');
+const hexEls = {}, ownerLbls = {}, centers = {};
+function el(tag, attrs, parent) {
+  const e = document.createElementNS(NS, tag);
+  for (const k in attrs) e.setAttribute(k, attrs[k]);
+  parent.appendChild(e);
+  return e;
+}
+function buildMap() {
+  const maxCol = 7, maxRow = 10;
+  svg.setAttribute('viewBox', `0 0 ${PAD * 2 + HW * maxCol} ${PAD * 2 + R * 1.5 * maxRow + R / 2}`);
+  COUNTIES.forEach(c => {
+    const pts = c.hexes.map(hexCenter);
+    centers[c.id] = [pts.reduce((s, p) => s + p[0], 0) / pts.length, pts.reduce((s, p) => s + p[1], 0) / pts.length];
+  });
+  const seaLayer = el('g', {}, svg);
+  for (const [a, list] of Object.entries(SEA_ADJ)) for (const b of list) {
+    el('line', { x1: centers[a][0], y1: centers[a][1], x2: centers[b][0], y2: centers[b][1], class: 'sea' }, seaLayer);
+  }
+  const hexLayer = el('g', {}, svg);
+  const lblLayer = el('g', {}, svg);
+  COUNTIES.forEach(c => {
+    hexEls[c.id] = c.hexes.map(h => {
+      const poly = el('polygon', { points: hexPoints(hexCenter(h)), class: 'hex' }, hexLayer);
+      el('title', {}, poly).textContent = c.name;
+      return poly;
+    });
+    const [x, y] = hexCenter(c.hexes[0]);
+    el('text', { x, y: y + 2, class: 'lbl name' }, lblLayer).textContent = c.short;
+    ownerLbls[c.id] = el('text', { x, y: y + 17, class: 'lbl owner' }, lblLayer);
+  });
+  el('text', { x: PAD, y: PAD - 10, class: 'islandNote' }, svg).textContent = '虛線 = 海路（離島 ↔ 港口縣市）';
+}
+const arrowLayer = () => svg.querySelector('#arrows') || el('g', { id: 'arrows' }, svg);
+function flash(fromId, toId, A) {
+  document.querySelectorAll('.hex.atk, .hex.def').forEach(h => h.classList.remove('atk', 'def'));
+  void svg.getBoundingClientRect();
+  hexEls[fromId].forEach(h => h.classList.add('atk'));
+  hexEls[toId].forEach(h => h.classList.add('def'));
+  const layer = arrowLayer();
+  layer.innerHTML = '';
+  const [x1, y1] = centers[fromId], [x2, y2] = centers[toId];
+  const mx = (x1 + x2) / 2 - (y2 - y1) * 0.2, my = (y1 + y2) / 2 + (x2 - x1) * 0.2;
+  el('path', { d: `M${x1},${y1}Q${mx},${my} ${x2},${y2}`, class: 'arrow', stroke: byId[A].color }, layer);
+  clearTimeout(flash.t);
+  flash.t = setTimeout(() => { layer.innerHTML = ''; }, Math.max(500, delay() * 0.9));
+}
+
+// ─────────────── 畫面更新 ───────────────
+function render() {
+  COUNTIES.forEach(c => {
+    const f = state.owner[c.id];
+    hexEls[c.id].forEach(h => h.style.fill = byId[f].color);
+    ownerLbls[c.id].textContent = f === c.id ? '' : `屬 ${byId[f].short}`;
+  });
+  const list = alive().map(f => ({ f, ts: territories(f) })).sort((a, b) => b.ts.length - a.ts.length);
+  document.getElementById('board').innerHTML = list.map((x, i) => `<div class="row">
+    <span class="rk">${i + 1}</span><span class="sw" style="background:${byId[x.f].color}"></span>
+    <span class="nm">${byId[x.f].short}</span><span class="ts">${x.ts.map(id => byId[id].short).join('、')}</span>
+    <span class="ct">${x.ts.length} 塊</span></div>`).join('');
+  document.getElementById('roundTxt').textContent = `第 ${state.round} 回合`;
+  document.getElementById('aliveTxt').textContent = `存活 ${list.length} / 22`;
+  document.getElementById('boardTitle').textContent = `存活縣市排行榜（${list.length} / 22）`;
+  updateButtons();
+}
+
+function log(html, cls = '') {
+  const box = document.getElementById('log');
+  const div = document.createElement('div');
+  div.className = 'entry ' + cls;
+  div.innerHTML = html;
+  box.prepend(div);
+  while (box.children.length > 200) box.lastChild.remove();
+}
+
+// ─────────────── 綁定 ───────────────
+document.getElementById('stepBtn').addEventListener('click', step);
+document.getElementById('autoBtn').addEventListener('click', () => autoTimer ? stopAuto() : startAuto());
+document.getElementById('resetBtn').addEventListener('click', reset);
+document.getElementById('bannerReset').addEventListener('click', reset);
+
+buildMap();
+reset();
+</script>
+</body>
+</html>
