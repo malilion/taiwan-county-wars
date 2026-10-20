@@ -48,8 +48,12 @@
   function power(army, mult = 1) {
     return kinds(army).reduce((s, k) => s + army[k] * (U(k).atk + U(k).hp), 0) * mult;
   }
-  const atkMult = (f, id) => byId[id].atk * (1 + 0.12 * S.research[f].atk);
-  const defMult = (f, id) => byId[id].def * (1 + 0.12 * S.research[f].def);
+  // 地域技能的暫時加成：buff[id] = { atk, def, defUntil }；stun[id] = 無法出兵到第幾天
+  const atkBuff = id => S.buff[id]?.atk || 1;
+  const defBuff = id => S.buff[id]?.def && S.buff[id].defUntil >= S.day ? S.buff[id].def : 1;
+  const stunned = id => (S.stun[id] || 0) >= S.day;
+  const atkMult = (f, id) => byId[id].atk * (1 + 0.12 * S.research[f].atk) * atkBuff(id);
+  const defMult = (f, id) => byId[id].def * (1 + 0.12 * S.research[f].def) * defBuff(id);
 
   // ───────── 新遊戲 ─────────
   function initState(mode, player) {
@@ -57,6 +61,7 @@
       mode, player: player || null, over: false, day: 1, turnIdx: 0, current: null, sel: null, busy: false,
       sendHalf: false, acted: new Set(), owner: {}, army: {}, money: {}, research: {}, aggr: {}, paused: false,
       units: Object.fromEntries(UNIT_KEYS.map(k => [k, { ...UNITS[k], owner: null }])), unitSeq: 0,
+      skillReady: {}, buff: {}, stun: {},
     });
     COUNTIES.forEach(c => {
       S.owner[c.id] = c.id;
@@ -181,6 +186,7 @@
     render();
     await wait(0.9, gen);
     const r = resolveBattle(src, tgt, sent);
+    if (S.buff[src]) delete S.buff[src].atk; // 進攻加成用掉了
     clearArrows();
     battleBurst(src, 'attack');
     battleBurst(tgt, r.win ? 'win' : 'block');
@@ -254,6 +260,15 @@
     for (const k of kinds(S.army[id])) { const n = Math.floor(S.army[id][k] * ratio); S.army[id][k] -= n; lost += n; }
     return lost;
   }
+  // 依總兵力打掉一定比例（至少 1 人），隨機挑兵種
+  function loseTotal(id, ratio) {
+    const n = Math.min(count(S.army[id]), Math.max(1, Math.round(count(S.army[id]) * ratio)));
+    for (let i = 0; i < n; i++) {
+      const pool = kinds(S.army[id]).flatMap(k => Array(S.army[id][k]).fill(k));
+      S.army[id][pick(pool)]--;
+    }
+    return n;
+  }
   function randomEvent() {
     const events = [
       () => { ['yilan', 'hualien', 'taitung', 'pingtung'].forEach(id => lose(id, 0.2)); return '🌀 颱風登陸東半部！宜花東屏兵力 -20%'; },
@@ -273,6 +288,7 @@
       const k = pick(['atk', 'def', 'eco']);
       if (S.research[f][k] < 5 && S.money[f] >= researchCost(f, k)) { S.money[f] -= researchCost(f, k); S.research[f][k]++; }
     }
+    aiUseSkills(f);
     // 組建新兵種
     if (S.day >= 4 && S.money[f] > 200 && customOf(f).length < 2 && Math.random() < 0.12) aiDesign(f);
     // 招兵：集中在最有機會進攻或最受威脅的前線
@@ -305,7 +321,7 @@
       if (gen !== S.gen || S.over) return;
       let best = null;
       for (const src of owned(f)) {
-        if (S.acted.has(src) || count(S.army[src]) < 3) continue;
+        if (S.acted.has(src) || stunned(src) || count(S.army[src]) < 3) continue;
         for (const tgt of enemiesOf(src)) {
           const vsPlayer = S.owner[tgt] === S.player;
           if (S.day <= (vsPlayer ? S.diff.playerPeace : S.diff.aiPeace)) continue;
@@ -374,6 +390,67 @@
     });
   }
 
+  // ───────── 地域技能 ─────────
+  const skillOf = id => REGION_SKILLS[id];
+  const skillWait = id => Math.max(0, (S.skillReady[id] || 0) - S.day); // 還要等幾天
+  const HOSTILE = ['strike', 'storm', 'stun'];
+  // 和平期內不能對受保護的對象使用攻擊型技能
+  function hostileTargets(id) {
+    const f = S.owner[id];
+    return enemiesOf(id).filter(e => {
+      const vsPlayer = S.owner[e] === S.player;
+      if (f !== S.player && S.day <= (vsPlayer ? S.diff.playerPeace : S.diff.aiPeace)) return false;
+      return true;
+    });
+  }
+  // 回傳不能發動的原因；可以發動回傳 null
+  function skillBlock(id) {
+    const sk = skillOf(id);
+    if (skillWait(id)) return `冷卻 ${skillWait(id)} 天`;
+    if (sk.type === 'recruit' && !room(id)) return '兵力已滿';
+    if (HOSTILE.includes(sk.type) && !hostileTargets(id).length) return '無敵方鄰居';
+    if (sk.type === 'again' && !S.acted.has(id)) return '尚未出兵';
+    return null;
+  }
+  function useSkill(id) {
+    const sk = skillOf(id), f = S.owner[id];
+    if (skillBlock(id)) return false;
+    const by = `${fTag(f)} 在 ${cTag(id)} 發動地域技能「${sk.icon} ${sk.name}」`;
+    let detail = '';
+    if (sk.type === 'money') { S.money[f] += sk.value; detail = `進帳 ${sk.value} 萬`; }
+    else if (sk.type === 'recruit') { const n = addCapped(id, sk.unit, sk.value); detail = `${n} 名${UNITS[sk.unit].name}加入`; }
+    else if (sk.type === 'atk') { S.buff[id] = { ...S.buff[id], atk: sk.value }; detail = `下一次進攻攻擊 ×${sk.value}`; }
+    else if (sk.type === 'def') { S.buff[id] = { ...S.buff[id], def: sk.value, defUntil: S.day + 1 }; detail = `防禦 ×${sk.value} 到第 ${S.day + 1} 天`; }
+    else if (sk.type === 'strike') {
+      const t = hostileTargets(id).sort((a, b) => power(S.army[b]) - power(S.army[a]))[0];
+      detail = `${cTag(t)} 損失 ${loseTotal(t, sk.value)} 兵`;
+      popText(t, sk.icon, '#ef476f');
+    } else if (sk.type === 'storm') {
+      detail = hostileTargets(id).map(t => { popText(t, sk.icon, '#ef476f'); return `${cTag(t)} -${loseTotal(t, sk.value)}`; }).join('、');
+    } else if (sk.type === 'stun') {
+      const ts = hostileTargets(id);
+      ts.forEach(t => { S.stun[t] = S.day + 1; popText(t, '😵', '#ffd166'); });
+      detail = `${ts.map(cTag).join('、')} 到第 ${S.day + 1} 天都無法出兵`;
+    } else if (sk.type === 'again') { S.acted.delete(id); detail = '今天可以再出兵一次'; }
+    S.skillReady[id] = S.day + sk.cd;
+    popText(id, sk.icon + sk.name, '#c77dff');
+    log(`🌟 ${by}：${detail}`, f === S.player ? 'me skill' : 'skill');
+    return true;
+  }
+  function aiUseSkills(f) {
+    for (const id of owned(f)) {
+      const sk = skillOf(id);
+      if (sk.type === 'again' || skillBlock(id)) continue;
+      const front = isFront(id);
+      const threat = front ? Math.max(...enemiesOf(id).map(e => power(S.army[e]))) : 0;
+      const use = sk.type === 'money' || sk.type === 'recruit'
+        || (sk.type === 'atk' && front)
+        || (sk.type === 'def' && threat > power(S.army[id]) * 0.8)
+        || HOSTILE.includes(sk.type);
+      if (use) useSkill(id);
+    }
+  }
+
   // ───────── 玩家操作 ─────────
   const playerActive = () => S.mode === 'play' && !S.over && S.current === S.player && !S.busy;
 
@@ -388,6 +465,7 @@
       if (sel && mine && id !== sel && reachable(sel).has(id)) return openTransfer(sel, id);
     }
     if (sel && sel !== id && !mine && ADJ[sel].has(id) && !S.acted.has(sel) && count(S.army[sel])) {
+      if (stunned(sel)) return flash(`${byId[sel].short} 被困住了，到第 ${S.stun[sel]} 天都無法出兵`);
       S.busy = true;
       const gen = S.gen;
       await doAttack(sel, id, gen, S.sendHalf);
@@ -589,7 +667,7 @@
   function render() {
     if (!S.owner) return;
     const sel = S.sel;
-    const canAct = playerActive() && sel && S.owner[sel] === S.player && !S.acted.has(sel) && count(S.army[sel]) > 0;
+    const canAct = playerActive() && sel && S.owner[sel] === S.player && !S.acted.has(sel) && !stunned(sel) && count(S.army[sel]) > 0;
     const reach = S.transferMode && playerActive() && sel ? reachable(sel) : new Set();
     for (const c of COUNTIES) {
       const id = c.id, f = S.owner[id];
@@ -657,16 +735,34 @@
       <div><h3>${c.name} <small>${c.nick}</small></h3><div class="sub">${region.name}・稅收 ${c.econ} 萬・控制者 ${fTag(f)}</div></div></div></div>
       <div class="trait">✨ ${c.trait}</div>
       <div class="army">${armyHtml(a)}</div>
+      ${troopGrid(a)}
       <div class="cap ${count(a) >= MAX_TROOPS ? 'full' : ''}">兵力 ${count(a)} / ${MAX_TROOPS}${count(a) >= MAX_TROOPS ? '（已滿）' : ''}</div>`;
+    const sk = skillOf(id);
+    const block = skillBlock(id);
+    const status = [
+      atkBuff(id) > 1 ? `⚔️ 下次進攻 ×${atkBuff(id)}` : '',
+      defBuff(id) > 1 ? `🛡️ 防禦 ×${defBuff(id)}（到第 ${S.buff[id].defUntil} 天）` : '',
+      stunned(id) ? `😵 無法出兵（到第 ${S.stun[id]} 天）` : '',
+    ].filter(Boolean);
+    html += `<div class="rskill"><span class="ricon">${sk.icon}</span><div class="rtext"><b>地域技能：${sk.name}</b><small>${sk.desc}（冷卻 ${sk.cd} 天）</small></div>
+      ${isMineSel ? `<button id="skillBtn" ${block ? 'disabled' : ''}>${block || '發動'}</button>` : skillWait(id) ? `<span class="cdTag">冷卻 ${skillWait(id)} 天</span>` : ''}</div>
+      ${status.length ? `<div class="rstatus">${status.join('　')}</div>` : ''}`;
     if (isMineSel) {
       const acted = S.acted.has(id);
       html += `<div class="recruit">${unitsOf(f).map(k => `<button data-u="${k}" class="${U(k).owner ? 'custom' : ''}" ${S.money[f] < unitCost(k, id) || !room(id) ? 'disabled' : ''} title="${U(k).desc}">
         ${unitIcon(k)} ${U(k).name}<br><small>${unitCost(k, id)} 萬・攻${U(k).atk}/血${U(k).hp}・${UNIT_CLASSES[U(k).cls]}</small></button>`).join('')}</div>
         <button id="trBtn" class="trBtn ${S.transferMode ? 'on' : ''}" ${reachable(id).size ? '' : 'disabled'}>🚚 ${S.transferMode ? '點地圖上綠框的己方縣市（再按一次取消）' : reachable(id).size ? '調兵到其他己方縣市' : '調兵（還沒有其他相連的己方縣市）'}</button>
         <label class="half"><input type="checkbox" id="halfChk" ${S.sendHalf ? 'checked' : ''}> 進攻時只派一半兵力（其餘留守）</label>
-        <p class="hint">${acted ? '⛔ 這個縣市今天已經出兵過了（還能招兵、調兵）' : count(a) ? '👉 點擊<b class="hl-r">閃爍紅框</b>的相鄰敵方縣市進攻' : '先招兵才能出擊'}</p>`;
+        <p class="hint">${stunned(id) ? `😵 被困住了，到第 ${S.stun[id]} 天都無法出兵` : acted ? '⛔ 這個縣市今天已經出兵過了（還能招兵、調兵）' : count(a) ? '👉 點擊<b class="hl-r">閃爍紅框</b>的相鄰敵方縣市進攻' : '先招兵才能出擊'}</p>`;
     }
     box.innerHTML = html;
+  }
+
+  // 5×5 兵力格：每格一名戰鬥人員
+  function troopGrid(a) {
+    const cells = kinds(a).sort((x, y) => UNIT_KEYS.indexOf(U(x).cls) - UNIT_KEYS.indexOf(U(y).cls)).flatMap(k => Array(a[k]).fill(k));
+    return `<div class="tgrid">${Array.from({ length: MAX_TROOPS }, (_, i) =>
+      `<span class="tcell ${cells[i] ? 'cls-' + U(cells[i]).cls : ''}">${cells[i] ? unitIcon(cells[i], 'tcellImg') : ''}</span>`).join('')}</div>`;
   }
 
   function oddsHtml(tgt) {
@@ -747,6 +843,7 @@
     const b = e.target.closest('button[data-u]');
     if (b) recruit(b.dataset.u);
     if (e.target.closest('#trBtn')) { S.transferMode = !S.transferMode; render(); }
+    if (e.target.closest('#skillBtn') && playerActive() && S.owner[S.sel] === S.player) { useSkill(S.sel); render(); }
   });
   $('#info').addEventListener('change', e => { if (e.target.id === 'halfChk') { S.sendHalf = e.target.checked; renderInfo(); } });
   $('#research').addEventListener('click', e => { const b = e.target.closest('button[data-k]'); if (b) doResearch(b.dataset.k); });
