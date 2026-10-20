@@ -53,7 +53,7 @@ function buildMap(svg, onClick, onHover) {
   [['lienchiang', '馬祖列島'], ['kinmen', '金門']].forEach(([id, t]) => {
     const [x, y] = labelPos[id];
     svgEl('rect', { x: x - 48, y: y - 48, width: 96, height: 100, rx: 10 }, insets);
-    svgEl('text', { x: x - 42, y: y - 34 }, insets).textContent = t + '（示意）';
+    svgEl('text', { x: x - 42, y: y - 34 }, insets).textContent = t;
   });
 
   svgEl('path', { d: outlineD, class: 'coast-glow', filter: 'url(#glow)' }, svg);
