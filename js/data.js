@@ -134,3 +134,31 @@ function designUnit(weaponId, armorId, mountId) {
     parts: [w.name, a.name, m.name],
   };
 }
+
+// 地域技能：每個縣市專屬，誰佔領就能用（冷卻以天計）
+// type：money 加錢、recruit 免費徵兵、atk 本縣下次進攻加成、def 本縣防禦加成（到下一天結束）、
+//       strike 打擊最強的相鄰敵方縣市、storm 打擊所有相鄰敵方縣市、stun 相鄰敵方縣市隔天無法出兵、again 本縣今天可再出兵一次
+const REGION_SKILLS = {
+  keelung: { name: '雨都濃霧', icon: '🌫️', type: 'def', value: 1.5, cd: 3, desc: '濃霧籠罩港口，本縣防禦 ×1.5 到明天' },
+  taipei: { name: '房價壓迫', icon: '🏙️', type: 'strike', value: 0.3, cd: 4, desc: '最強的相鄰敵方縣市被房價逼走 30% 兵力' },
+  newtaipei: { name: '環狀線動員', icon: '🚇', type: 'recruit', unit: 'inf', value: 4, cd: 3, desc: '免費徵召 4 名阿兵哥' },
+  taoyuan: { name: '機場空運', icon: '✈️', type: 'again', cd: 3, desc: '空運支援，本縣今天可以再出兵一次' },
+  hsinchucounty: { name: '硬頸精神', icon: '💪', type: 'atk', value: 1.4, cd: 3, desc: '本縣下一次進攻攻擊 ×1.4' },
+  hsinchucity: { name: '護國神山', icon: '🏭', type: 'money', value: 150, cd: 5, desc: '晶圓廠全速運轉，進帳 150 萬' },
+  miaoli: { name: '苗栗國結界', icon: '🛂', type: 'def', value: 2, cd: 5, desc: '邊境結界展開，本縣防禦 ×2 到明天' },
+  taichung: { name: '慶記支援', icon: '🔫', type: 'atk', value: 1.5, cd: 4, desc: '本縣下一次進攻攻擊 ×1.5' },
+  changhua: { name: '肉圓鐵騎', icon: '🛵', type: 'recruit', unit: 'moto', value: 3, cd: 4, desc: '免費徵召 3 名機車騎士' },
+  nantou: { name: '山豬突襲', icon: '🐗', type: 'strike', value: 0.25, cd: 4, desc: '山豬衝進最強的相鄰敵方縣市，打掉 25% 兵力' },
+  yunlin: { name: '農業豐收', icon: '🌾', type: 'money', value: 100, cd: 4, desc: '全台糧倉大豐收，進帳 100 萬' },
+  chiayicounty: { name: '阿里山雲海', icon: '☁️', type: 'def', value: 1.5, cd: 3, desc: '雲海遮蔽，本縣防禦 ×1.5 到明天' },
+  chiayicity: { name: '雞肉飯補給', icon: '🍗', type: 'recruit', unit: 'inf', value: 4, cd: 3, desc: '吃飽的鄉親加入，免費徵召 4 名阿兵哥' },
+  tainan: { name: '全糖護盾', icon: '🧋', type: 'def', value: 1.8, cd: 4, desc: '甜度破表，本縣防禦 ×1.8 到明天' },
+  kaohsiung: { name: '發大財', icon: '💰', type: 'money', value: 120, cd: 4, desc: '港都貨櫃滿載，進帳 120 萬' },
+  pingtung: { name: '落山風', icon: '🌪️', type: 'storm', value: 0.2, cd: 5, desc: '狂風掃過所有相鄰敵方縣市，各打掉 20% 兵力' },
+  yilan: { name: '雪隧塞車', icon: '🚗', type: 'stun', cd: 5, desc: '所有相鄰敵方縣市塞在雪隧，到明天都無法出兵' },
+  hualien: { name: '太魯閣落石', icon: '🪨', type: 'strike', value: 0.3, cd: 4, desc: '落石砸向最強的相鄰敵方縣市，打掉 30% 兵力' },
+  taitung: { name: '熱氣球空投', icon: '🎈', type: 'recruit', unit: 'art', value: 2, cd: 4, desc: '熱氣球空投 2 名砲兵' },
+  penghu: { name: '消波塊要塞', icon: '🧱', type: 'def', value: 1.8, cd: 4, desc: '海岸全是消波塊，本縣防禦 ×1.8 到明天' },
+  kinmen: { name: '金門砲擊', icon: '💥', type: 'strike', value: 0.3, cd: 4, desc: '老砲台開火，最強的相鄰敵方縣市損失 30% 兵力' },
+  lienchiang: { name: '藍眼淚幻術', icon: '✨', type: 'stun', cd: 5, desc: '相鄰敵方縣市看藍眼淚看呆了，到明天都無法出兵' },
+};
