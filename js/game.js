@@ -18,6 +18,8 @@
   const room = id => Math.max(0, MAX_TROOPS - count(S.army[id]));
   const addCapped = (id, k, n) => { const m = Math.min(n, room(id)); addUnits(S.army[id], k, m); return m; };
   const U = k => S.units[k];
+  const iconMarkup = (icon, cls = 'unit-sprite') => typeof icon === 'string' && icon.startsWith('assets/')
+    ? `<img class="${cls}" src="${icon}" alt="">` : icon;
   const fmtMoney = n => `${Math.floor(n)} 萬`;
 
   const S = { gen: 0, speed: 1, paused: false, over: true, hover: null, diffKey: 'easy' };
@@ -30,7 +32,7 @@
   const isFront = id => enemiesOf(id).length > 0;
   const fTag = f => `<b style="color:${byId[f].color}">${byId[f].short}</b>`;
   const cTag = id => `<span class="ctag">${byId[id].short}</span>`;
-  const unitIcon = (k, cls = 'unit-sprite') => U(k).sprite ? `<img class="${cls}" src="${U(k).sprite}" alt="">` : U(k).icon;
+  const unitIcon = (k, cls = 'unit-sprite') => iconMarkup(U(k).sprite || U(k).icon, cls);
   const unitCost = (k, id) => Math.round(U(k).cost * (byId[id].cheap === U(k).cls ? 0.8 : 1));
   const unitsOf = f => [...UNIT_KEYS, ...Object.keys(S.units).filter(k => S.units[k].owner === f)];
   const customOf = f => Object.keys(S.units).filter(k => S.units[k].owner === f);
@@ -626,20 +628,20 @@
   function renderDesigner() {
     const d = S.draft;
     $('#dzParts').innerHTML = Object.entries(PARTS).map(([slot, list]) => `<div class="dzRow"><span class="dzLabel">${PART_LABELS[slot]}</span>
-      <div class="chips">${list.map(p => `<button data-slot="${slot}" data-id="${p.id}" class="${d[slot] === p.id ? 'on' : ''}">${p.icon} ${p.name}<br>
+      <div class="chips">${list.map(p => `<button data-slot="${slot}" data-id="${p.id}" class="${d[slot] === p.id ? 'on' : ''}">${iconMarkup(p.sprite || p.icon, 'part-sprite')} ${p.name}<br>
       <small>${[p.atk ? `攻+${p.atk}` : '', p.hp ? `血+${p.hp}` : '', `${p.cost}萬`, p.ranged ? '遠程' : '', p.heavy ? '重甲' : '', p.vehicle ? '載具' : ''].filter(Boolean).join(' ')}</small></button>`).join('')}</div></div>`).join('');
-    $('#dzIcons').innerHTML = UNIT_ICONS.map(i => `<button data-icon="${i}" class="${d.icon === i ? 'on' : ''}">${i}</button>`).join('');
+    $('#dzIcons').innerHTML = UNIT_ICONS.map(i => `<button data-icon="${i}" class="${d.icon === i ? 'on' : ''}">${iconMarkup(i, 'unit-avatar')}</button>`).join('');
     const spec = designUnit(d.weapon, d.armor, d.mount);
     const name = d.name.trim() || defaultUnitName(spec);
     const base = UNITS[spec.cls];
     const beats = UNIT_CLASSES[COUNTERS[spec.cls]];
     const beatenBy = UNIT_CLASSES[UNIT_KEYS.find(c => COUNTERS[c] === spec.cls)];
-    $('#dzPreview').innerHTML = `<span class="big">${d.icon}</span><div>
+    $('#dzPreview').innerHTML = `<span class="big">${iconMarkup(d.icon, 'avatar-large')}</span><div>
       <h3>${name} <small style="color:var(--accent)">${UNIT_CLASSES[spec.cls]}</small></h3>
       <div class="stats"><span>⚔️ 攻擊 <b>${spec.atk}</b></span><span>❤️ 血量 <b>${spec.hp}</b></span><span>💰 單價 <b>${spec.cost} 萬</b></span></div>
-      <div class="cmp">剋 ${beats}、怕 ${beatenBy}｜同兵系基本兵：${base.icon}${base.name} 攻${base.atk}/血${base.hp}/${base.cost}萬</div></div>`;
+      <div class="cmp">剋 ${beats}、怕 ${beatenBy}｜同兵系基本兵：${unitIcon(spec.cls)}${base.name} 攻${base.atk}/血${base.hp}/${base.cost}萬</div></div>`;
     const mine = customOf(S.player);
-    $('#dzMine').innerHTML = `已組建 ${mine.length}/${MAX_CUSTOM_UNITS}：` + (mine.map(k => `<span class="mu">${U(k).icon} ${U(k).name}</span>`).join('') || '（還沒有）');
+    $('#dzMine').innerHTML = `已組建 ${mine.length}/${MAX_CUSTOM_UNITS}：` + (mine.map(k => `<span class="mu">${unitIcon(k, 'unit-avatar-mini')} ${U(k).name}</span>`).join('') || '（還沒有）');
     $('#dzOk').textContent = `組建（${DESIGN_FEE} 萬）`;
     $('#dzOk').disabled = S.money[S.player] < DESIGN_FEE;
   }
@@ -650,7 +652,7 @@
     const spec = designUnit(d.weapon, d.armor, d.mount);
     const name = d.name.trim() || defaultUnitName(spec);
     createUnit(f, name, d.icon, spec);
-    log(`🛠️ 組建新兵種「${d.icon} ${name}」（${spec.parts.join('＋')}），攻${spec.atk}/血${spec.hp}`, 'me');
+    log(`🛠️ 組建新兵種「${iconMarkup(d.icon, 'log-avatar')} ${name}」（${spec.parts.join('＋')}），攻${spec.atk}/血${spec.hp}`, 'me');
     $('#designer').hidden = true;
     render();
   }
@@ -830,7 +832,8 @@
       card.cells.forEach((cell, i) => {
         const k = units[i];
         cell.rect.setAttribute('class', 'ccell' + (k ? ' cls-' + U(k).cls : ''));
-        const sprite = k && U(k).sprite;
+        // 基本兵種用 sprite；自組兵種的 icon 本身就是圖片路徑
+        const sprite = k && (U(k).sprite || (U(k).icon.startsWith('assets/') ? U(k).icon : null));
         if (sprite) cell.img.setAttribute('href', sprite);
         cell.img.style.display = sprite ? '' : 'none';
         cell.txt.textContent = k && !sprite ? U(k).icon : '';
@@ -867,7 +870,7 @@
     if (!id || !S.owner || S.over) { tip.hidden = true; return; }
     const c = byId[id], f = S.owner[id], a = S.army[id];
     tip.innerHTML = `<b>${c.short}</b> <small>${c.nick}</small> ${f !== id ? `<small>（${fTag(f)} 佔領）</small>` : ''}
-      <div>${kinds(a).map(k => `${U(k).icon}${a[k]}`).join(' ') || '空城'}</div>${oddsHtml(id)}`;
+      <div>${kinds(a).map(k => `${unitIcon(k, 'unit-sprite-small')}${a[k]}`).join(' ') || '空城'}</div>${oddsHtml(id)}`;
     tip.hidden = false;
   }
   $('#mapWrap').addEventListener('mousemove', e => {
@@ -886,7 +889,7 @@
     $('#diffDesc').textContent = DIFFICULTY[S.diffKey].desc;
     $('#pickGrid').innerHTML = REGIONS.map(r => `<div class="preg"><h4>${r.name}</h4>${r.ids.map(id => {
       const c = byId[id];
-      return `<button class="pickBtn" data-id="${id}"><span class="sw" style="background:${c.color}"></span>${c.short}<small>${c.nick}</small></button>`;
+      return `<button class="pickBtn" data-id="${id}">${c.portrait ? `<img class="pick-portrait" src="${c.portrait}" alt="" loading="lazy">` : ''}<span class="sw" style="background:${c.color}"></span>${c.short}<small>${c.nick}</small></button>`;
     }).join('')}</div>`).join('');
   }
   function showEnd(win, text, winner) {
