@@ -1,0 +1,84 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>台灣縣市大戰</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@400;700;900&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <header id="top">
+    <h1>台灣縣市大戰 <small>Great War of Taiwan</small></h1>
+    <div class="status"><span id="day">第 1 天</span><span id="turn"></span></div>
+    <div class="ctrls">
+      <div id="speed" class="seg">
+        <button data-s="1" class="on">1x</button><button data-s="2">2x</button><button data-s="4">4x</button><button data-s="99">⚡</button>
+      </div>
+      <button id="pauseBtn">⏸ 暫停</button>
+      <button id="newBtn">新遊戲</button>
+    </div>
+  </header>
+
+  <main>
+    <section id="mapWrap">
+      <svg id="map" role="img" aria-label="台灣縣市地圖"></svg>
+    </section>
+
+    <aside id="side">
+      <div id="mePanel" class="card" hidden>
+        <div class="mehead"><span id="meName"></span><span id="meCounties"></span></div>
+        <div class="money"><span>💰 <b id="meMoney"></b></span><span id="meIncome"></span></div>
+        <div id="research"></div>
+        <button id="endTurn" class="primary">結束回合 ▶</button>
+      </div>
+      <div id="info" class="card"></div>
+      <div class="card">
+        <h4 id="boardTitle">勢力排行</h4>
+        <div id="board"></div>
+      </div>
+      <div class="card logcard">
+        <h4>戰報</h4>
+        <div id="log"></div>
+      </div>
+    </aside>
+  </main>
+
+  <div id="toast"></div>
+  <div id="tip" hidden></div>
+
+  <div id="modal">
+    <div class="dialog">
+      <div id="startView">
+        <h2>台灣縣市大戰</h2>
+        <p class="tag">22 縣市，只能留下一個。</p>
+        <h3>🎮 選擇你的縣市出征</h3>
+        <div id="pickGrid"></div>
+        <button id="watchAll" class="primary wide">👀 觀戰模式：看 22 縣市 AI 大亂鬥</button>
+        <details class="rules">
+          <summary>遊戲規則</summary>
+          <ul>
+            <li>每天輪到你時會收到稅收（萬元），控制整個地區（北、中、南、東、離島）有額外加成。</li>
+            <li>點選自己的縣市可以<b>招兵</b>；每個縣市每天可以<b>出兵一次</b>：點相鄰敵方縣市進攻，或點相鄰己方縣市調兵。</li>
+            <li>兵種相剋：🛵 機車 剋 💣 砲兵 剋 👺 八家將 剋 🪖 阿兵哥 剋 🛵 機車。</li>
+            <li>每個縣市有特性（例如苗栗國防禦 +25%）；研發可以永久提升攻擊、防禦或稅收。</li>
+            <li>離島靠海上航線連接（虛線）。消滅所有其他縣市即可統一全台！</li>
+          </ul>
+        </details>
+      </div>
+      <div id="endView" hidden>
+        <h2 id="endTitle"></h2>
+        <p id="endText"></p>
+        <button id="againBtn" class="primary wide">再來一局</button>
+        <button id="watchBtn" class="wide">繼續觀戰</button>
+      </div>
+    </div>
+  </div>
+
+  <script src="https://cdn.jsdelivr.net/npm/d3-delaunay@6.0.4/dist/d3-delaunay.min.js"></script>
+  <script src="js/data.js"></script>
+  <script src="js/map.js"></script>
+  <script src="js/game.js"></script>
+</body>
+</html>
