@@ -13,6 +13,10 @@
   const kinds = a => Object.keys(a).filter(k => a[k] > 0);
   const count = a => kinds(a).reduce((s, k) => s + a[k], 0);
   const addUnits = (a, k, n) => { a[k] = (a[k] || 0) + n; };
+  // 每個縣市最多 MAX_TROOPS 名戰鬥人員
+  const MAX_TROOPS = 25;
+  const room = id => Math.max(0, MAX_TROOPS - count(S.army[id]));
+  const addCapped = (id, k, n) => { const m = Math.min(n, room(id)); addUnits(S.army[id], k, m); return m; };
   const U = k => S.units[k];
   const fmtMoney = n => `${Math.floor(n)} 萬`;
 
@@ -93,7 +97,7 @@
         const inc = income(f);
         S.money[f] += inc;
         // 替代役：兵力太少的縣市每天自動補 1 名阿兵哥
-        owned(f).forEach(id => { if (count(S.army[id]) < 2) addUnits(S.army[id], 'inf', 1); });
+        owned(f).forEach(id => { if (count(S.army[id]) < 2) addCapped(id, 'inf', 1); });
         if (f === S.player && S.mode === 'play') {
           S.acted = new Set();
           log(`🌅 第 ${S.day} 天，輪到你了！稅收 +${fmtMoney(inc)}`, 'me');
@@ -125,6 +129,7 @@
   function endPlayerTurn() {
     if (S.mode !== 'play' || S.current !== S.player || S.busy || S.over) return;
     S.sel = null;
+    S.transferMode = false;
     S.current = null;
     nextTurn(S.gen).then(() => runLoop(S.gen));
   }
@@ -207,6 +212,17 @@
     return out;
   }
   function mergeArmy(to, from) { for (const k of kinds(from)) addUnits(to, k, from[k]); }
+  // 調兵：目標縣市塞不下的留在原地，回傳實際移動人數
+  function moveTroops(from, to, half) {
+    const moving = splitArmy(from, half);
+    let moved = 0;
+    for (const k of kinds(moving)) {
+      const n = addCapped(to, k, moving[k]);
+      moved += n;
+      addUnits(S.army[from], k, moving[k] - n);
+    }
+    return moved;
+  }
 
   const ELIM_LINES = [
     '居民表示：反正房價一樣買不起。',
@@ -244,8 +260,8 @@
       () => { const id = pick(COUNTIES).id; const n = lose(id, 0.35); popText(id, '地震！', '#ef476f'); return `🌏 ${cTag(id)} 發生強震，損失 ${n} 兵`; },
       () => { alive().forEach(f => S.money[f] += 50); return '🗳️ 選舉到了！各勢力發放補助，全體 +50 萬'; },
       () => { const f = pick(alive()); S.money[f] += 120; return `🧋 ${fTag(f)} 的珍奶外銷大賣，進帳 120 萬`; },
-      () => { ['taichung', 'changhua', 'yunlin', 'chiayicounty'].forEach(id => addUnits(S.army[id], 'gen', 1)); return '🏮 媽祖遶境！台中、彰化、雲林、嘉義各加入 1 名八家將'; },
-      () => { const id = pick(COUNTIES).id; addUnits(S.army[id], 'inf', 3); return `🍱 ${cTag(id)} 辦桌請客，3 名阿兵哥吃飽加入`; },
+      () => { ['taichung', 'changhua', 'yunlin', 'chiayicounty'].forEach(id => addCapped(id, 'gen', 1)); return '🏮 媽祖遶境！台中、彰化、雲林、嘉義各加入 1 名八家將（滿 25 人的縣市擠不進去）'; },
+      () => { const id = pick(COUNTIES).id; const n = addCapped(id, 'inf', 3); return n ? `🍱 ${cTag(id)} 辦桌請客，${n} 名阿兵哥吃飽加入` : `🍱 ${cTag(id)} 辦桌請客，但營區已滿 25 人，大家吃飽就回家了`; },
     ];
     log(pick(events)(), 'event');
   }
@@ -271,7 +287,9 @@
       const ranked = front.sort((a, b) => score(b) - score(a));
       let guard = 0;
       while (S.money[f] >= 10 && guard++ < 60) {
-        const id = Math.random() < 0.7 ? ranked[0] : pick(ranked);
+        const open = ranked.filter(id => room(id) > 0);
+        if (!open.length) break;
+        const id = Math.random() < 0.7 ? open[0] : pick(open);
         const k = aiChooseUnit(id);
         const cost = unitCost(k, id);
         if (S.money[f] < cost) { if (S.money[f] >= unitCost('inf', id)) { S.money[f] -= unitCost('inf', id); addUnits(S.army[id], 'inf', 1); } else break; continue; }
@@ -352,7 +370,7 @@
     ids.filter(id => dist[id] > 0).sort((a, b) => dist[b] - dist[a]).forEach(id => {
       const to = [...ADJ[id]].find(n => S.owner[n] === f && dist[n] === dist[id] - 1);
       if (!to || !count(S.army[id])) return;
-      mergeArmy(S.army[to], splitArmy(id, false));
+      moveTroops(id, to, false);
     });
   }
 
@@ -364,16 +382,12 @@
     if (!playerActive()) { S.sel = id; render(); return; }
     const mine = S.owner[id] === S.player;
     const sel = S.sel && S.owner[S.sel] === S.player ? S.sel : null;
-    if (sel && sel !== id && ADJ[sel].has(id) && !S.acted.has(sel) && count(S.army[sel])) {
-      if (mine) {
-        // 調兵
-        mergeArmy(S.army[id], splitArmy(sel, S.sendHalf));
-        S.acted.add(sel);
-        log(`🚚 從 ${cTag(sel)} 調兵到 ${cTag(id)}`, 'me');
-        S.sel = id;
-        render();
-        return;
-      }
+    // 調兵模式：點一個連通的己方縣市 → 開調兵視窗
+    if (S.transferMode) {
+      S.transferMode = false;
+      if (sel && mine && id !== sel && reachable(sel).has(id)) return openTransfer(sel, id);
+    }
+    if (sel && sel !== id && !mine && ADJ[sel].has(id) && !S.acted.has(sel) && count(S.army[sel])) {
       S.busy = true;
       const gen = S.gen;
       await doAttack(sel, id, gen, S.sendHalf);
@@ -387,10 +401,72 @@
     render();
   }
 
+  // 透過己方領土（含海路）連通的縣市
+  function reachable(from) {
+    const seen = new Set([from]);
+    const q = [from];
+    while (q.length) for (const n of ADJ[q.shift()]) if (!seen.has(n) && S.owner[n] === S.owner[from]) { seen.add(n); q.push(n); }
+    seen.delete(from);
+    return seen;
+  }
+
+  function openTransfer(from, to) {
+    S.tr = { from, to, amt: {} };
+    $('#transfer').hidden = false;
+    renderTransfer();
+  }
+  function renderTransfer() {
+    const { from, to, amt } = S.tr;
+    const total = Object.values(amt).reduce((a, b) => a + b, 0);
+    const space = room(to);
+    const src = S.army[from];
+    $('#trTitle').innerHTML = `🚚 從 ${cTag(from)} 調兵到 ${cTag(to)}`;
+    $('#trRows').innerHTML = kinds(src).map(k => `<div class="trRow">
+      <span class="trName">${unitIcon(k)} ${U(k).name}<small>現有 ${src[k]}</small></span>
+      <span class="trCtl">
+        <button data-k="${k}" data-d="-1" ${!amt[k] ? 'disabled' : ''}>−</button>
+        <b>${amt[k] || 0}</b>
+        <button data-k="${k}" data-d="1" ${(amt[k] || 0) >= src[k] || total >= space ? 'disabled' : ''}>＋</button>
+        <button data-k="${k}" data-d="max" ${(amt[k] || 0) >= src[k] || total >= space ? 'disabled' : ''}>全部</button>
+      </span>
+    </div>`).join('') || '<p class="hint">這個縣市沒有部隊可以調</p>';
+    $('#trInfo').innerHTML = `${cTag(from)} ${count(src)} → ${count(src) - total} 人｜${cTag(to)} ${count(S.army[to])} → ${count(S.army[to]) + total} / ${MAX_TROOPS} 人${space === 0 ? '<b class="hl-r">（目標已滿）</b>' : ''}`;
+    $('#trOk').disabled = total === 0;
+    $('#trOk').textContent = `確認調動 ${total} 人`;
+  }
+  function changeTransfer(k, d) {
+    const { to, amt } = S.tr;
+    const have = S.army[S.tr.from][k];
+    const total = Object.values(amt).reduce((a, b) => a + b, 0);
+    const cur = amt[k] || 0;
+    const free = room(to) - total;
+    amt[k] = d === 'max' ? Math.min(have, cur + free) : Math.max(0, Math.min(have, cur + Number(d), cur + free));
+    renderTransfer();
+  }
+  function confirmTransfer() {
+    const { from, to, amt } = S.tr;
+    let moved = 0;
+    for (const k of Object.keys(amt)) {
+      const n = Math.min(amt[k], S.army[from][k] || 0, room(to));
+      S.army[from][k] -= n;
+      addUnits(S.army[to], k, n);
+      moved += n;
+    }
+    $('#transfer').hidden = true;
+    if (moved) log(`🚚 從 ${cTag(from)} 調 ${moved} 兵到 ${cTag(to)}`, 'me');
+    S.sel = to;
+    render();
+  }
+  $('#trRows').addEventListener('click', e => { const b = e.target.closest('button[data-k]'); if (b) changeTransfer(b.dataset.k, b.dataset.d); });
+  $('#trOk').addEventListener('click', confirmTransfer);
+  $('#trCancel').addEventListener('click', () => { $('#transfer').hidden = true; });
+  $('#trSwap').addEventListener('click', () => openTransfer(S.tr.to, S.tr.from));
+
   function recruit(k) {
     const id = S.sel;
     if (!playerActive() || !id || S.owner[id] !== S.player) return;
     const cost = unitCost(k, id);
+    if (!room(id)) return flash(`每個縣市最多 ${MAX_TROOPS} 名戰鬥人員`);
     if (S.money[S.player] < cost) return flash('錢不夠！');
     S.money[S.player] -= cost;
     addUnits(S.army[id], k, 1);
@@ -514,6 +590,7 @@
     if (!S.owner) return;
     const sel = S.sel;
     const canAct = playerActive() && sel && S.owner[sel] === S.player && !S.acted.has(sel) && count(S.army[sel]) > 0;
+    const reach = S.transferMode && playerActive() && sel ? reachable(sel) : new Set();
     for (const c of COUNTIES) {
       const id = c.id, f = S.owner[id];
       const g = map.groups[id], L = map.labels[id];
@@ -522,8 +599,8 @@
       L.num.textContent = count(S.army[id]);
       const target = canAct && ADJ[sel].has(id);
       g.classList.toggle('selected', id === sel);
-      g.classList.toggle('target', target && f !== S.player);
-      g.classList.toggle('move', target && f === S.player);
+      g.classList.toggle('target', !S.transferMode && target && f !== S.player);
+      g.classList.toggle('move', reach.has(id));
       L.g.classList.toggle('selected', id === sel);
       L.g.classList.toggle('mine', S.mode === 'play' && f === S.player);
       L.g.classList.toggle('acted', S.current === f && S.acted.has(id));
@@ -579,13 +656,15 @@
     let html = `<div class="county-hero">${c.portrait ? `<img class="county-portrait" src="${c.portrait}" alt="${c.name}角色插畫">` : ''}<div class="ihead"><span class="sw big" style="background:${byId[f].color}"></span>
       <div><h3>${c.name} <small>${c.nick}</small></h3><div class="sub">${region.name}・稅收 ${c.econ} 萬・控制者 ${fTag(f)}</div></div></div></div>
       <div class="trait">✨ ${c.trait}</div>
-      <div class="army">${armyHtml(a)}</div>`;
+      <div class="army">${armyHtml(a)}</div>
+      <div class="cap ${count(a) >= MAX_TROOPS ? 'full' : ''}">兵力 ${count(a)} / ${MAX_TROOPS}${count(a) >= MAX_TROOPS ? '（已滿）' : ''}</div>`;
     if (isMineSel) {
       const acted = S.acted.has(id);
-      html += `<div class="recruit">${unitsOf(f).map(k => `<button data-u="${k}" class="${U(k).owner ? 'custom' : ''}" ${S.money[f] < unitCost(k, id) ? 'disabled' : ''} title="${U(k).desc}">
+      html += `<div class="recruit">${unitsOf(f).map(k => `<button data-u="${k}" class="${U(k).owner ? 'custom' : ''}" ${S.money[f] < unitCost(k, id) || !room(id) ? 'disabled' : ''} title="${U(k).desc}">
         ${unitIcon(k)} ${U(k).name}<br><small>${unitCost(k, id)} 萬・攻${U(k).atk}/血${U(k).hp}・${UNIT_CLASSES[U(k).cls]}</small></button>`).join('')}</div>
-        <label class="half"><input type="checkbox" id="halfChk" ${S.sendHalf ? 'checked' : ''}> 只派一半兵力（其餘留守）</label>
-        <p class="hint">${acted ? '⛔ 這個縣市今天已經行動過了（還能招兵）' : count(a) ? '👉 點擊<b class="hl-r">閃爍紅框</b>的相鄰縣市進攻，或<b class="hl-g">綠框</b>己方縣市調兵' : '先招兵才能出擊'}</p>`;
+        <button id="trBtn" class="trBtn ${S.transferMode ? 'on' : ''}" ${reachable(id).size ? '' : 'disabled'}>🚚 ${S.transferMode ? '點地圖上綠框的己方縣市（再按一次取消）' : reachable(id).size ? '調兵到其他己方縣市' : '調兵（還沒有其他相連的己方縣市）'}</button>
+        <label class="half"><input type="checkbox" id="halfChk" ${S.sendHalf ? 'checked' : ''}> 進攻時只派一半兵力（其餘留守）</label>
+        <p class="hint">${acted ? '⛔ 這個縣市今天已經出兵過了（還能招兵、調兵）' : count(a) ? '👉 點擊<b class="hl-r">閃爍紅框</b>的相鄰敵方縣市進攻' : '先招兵才能出擊'}</p>`;
     }
     box.innerHTML = html;
   }
@@ -664,13 +743,17 @@
     S.speed = +b.dataset.s;
     document.querySelectorAll('#speed button').forEach(x => x.classList.toggle('on', x === b));
   });
-  $('#info').addEventListener('click', e => { const b = e.target.closest('button[data-u]'); if (b) recruit(b.dataset.u); });
+  $('#info').addEventListener('click', e => {
+    const b = e.target.closest('button[data-u]');
+    if (b) recruit(b.dataset.u);
+    if (e.target.closest('#trBtn')) { S.transferMode = !S.transferMode; render(); }
+  });
   $('#info').addEventListener('change', e => { if (e.target.id === 'halfChk') { S.sendHalf = e.target.checked; renderInfo(); } });
   $('#research').addEventListener('click', e => { const b = e.target.closest('button[data-k]'); if (b) doResearch(b.dataset.k); });
   document.addEventListener('keydown', e => {
-    if (!$('#modal').hidden || !$('#designer').hidden || e.target.tagName === 'INPUT') return;
+    if (!$('#modal').hidden || !$('#designer').hidden || !$('#transfer').hidden || e.target.tagName === 'INPUT') return;
     if (e.key === 'Enter' || e.key === 'e') endPlayerTurn();
-    if (e.key === 'Escape') { S.sel = null; render(); }
+    if (e.key === 'Escape') { S.sel = null; S.transferMode = false; render(); }
   });
 
   // 開場畫面背後先顯示初始地圖
