@@ -112,6 +112,11 @@ main { flex: 1; display: flex; min-height: 0; }
 @keyframes dash { to { stroke-dashoffset: -16; } }
 .pop { font-size: 18px; font-weight: 900; text-anchor: middle; paint-order: stroke; stroke: #000; stroke-width: 4px; animation: pop 1.2s ease-out forwards; pointer-events: none; }
 @keyframes pop { 0% { transform: translateY(6px); opacity: 0; } 15% { opacity: 1; } 100% { transform: translateY(-22px); opacity: 0; } }
+.battle-burst { opacity: 0; pointer-events: none; stroke: #fff; stroke-width: 1.5px; transform-box: fill-box; transform-origin: center; animation: battle-burst .65s ease-out forwards; }
+.battle-burst.attack { fill: #ef476f; }
+.battle-burst.win { fill: #ffd166; }
+.battle-burst.block { fill: #48cae4; }
+@keyframes battle-burst { 15% { opacity: 1; transform: scale(.35); } 55% { opacity: 1; transform: scale(1.1); } 100% { opacity: 0; transform: scale(1.5); } }
 
 /* 側欄 */
 .mehead { display: flex; justify-content: space-between; font-size: 17px; font-weight: 700; }
@@ -123,6 +128,8 @@ main { flex: 1; display: flex; min-height: 0; }
 #endTurn { width: 100%; padding: 10px; font-size: 16px; }
 
 .ihead { display: flex; gap: 10px; align-items: center; }
+.county-hero { display: flex; align-items: center; gap: 8px; min-height: 92px; }
+.county-portrait { width: 82px; height: 100px; flex: 0 0 82px; object-fit: contain; }
 .ihead h3 { margin: 0; font-size: 18px; }
 .ihead h3 small { font-size: 13px; color: var(--accent); }
 .sub { font-size: 12px; color: var(--muted); }
@@ -132,8 +139,10 @@ main { flex: 1; display: flex; min-height: 0; }
 .army { display: flex; gap: 6px; }
 .army span { flex: 1; background: var(--panel2); border-radius: 8px; padding: 6px; text-align: center; font-size: 18px; }
 .army b { display: block; font-size: 15px; }
+.unit-sprite { width: 34px; height: 34px; object-fit: contain; vertical-align: middle; }
 .recruit { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; margin-top: 10px; }
 .recruit button { font-size: 13px; padding: 6px; line-height: 1.35; }
+.recruit .unit-sprite { width: 50px; height: 48px; }
 .recruit small { color: var(--muted); font-size: 11px; }
 .half { display: block; font-size: 13px; margin-top: 8px; color: var(--muted); }
 .hint { font-size: 13px; color: var(--muted); margin: 8px 0 0; }
