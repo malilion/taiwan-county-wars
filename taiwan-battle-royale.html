@@ -148,6 +148,10 @@
   button.wide { width: 100%; margin-top: 12px; padding: 10px; }
   .rules { color: var(--muted); font-size: 13px; padding-left: 18px; margin: 14px 0 0; line-height: 1.6; }
 
+  .phead .portrait { width: 72px; height: 72px; object-fit: contain; border-radius: 12px; border: 2px solid; background: #fff8ec; flex-shrink: 0; }
+  .pickImg { width: 34px; height: 34px; object-fit: contain; border-radius: 8px; border: 2px solid; background: #fff8ec; flex-shrink: 0; }
+  .bhead .bImg { width: 36px; height: 36px; object-fit: contain; border-radius: 8px; border: 2px solid; background: #fff8ec; }
+
   @media (max-width: 860px) {
     main { flex-direction: column; }
     #mapWrap { height: 78vh; flex: none; }
@@ -524,6 +528,9 @@ const SEA_ADJ = {
 };
 
 const byId = Object.fromEntries(COUNTIES.map(c => [c.id, c]));
+// 角色插畫（assets/characters/）
+const PNG_PORTRAITS = ['taichung', 'tainan', 'hualien'];
+const portrait = id => `assets/characters/${id}-chibi.${PNG_PORTRAITS.includes(id) ? 'png' : 'webp'}`;
 const ADJ = Object.fromEntries(COUNTIES.map(c => [c.id, new Set()]));
 for (const table of [LAND_ADJ, SEA_ADJ]) {
   for (const [a, list] of Object.entries(table)) for (const b of list) { ADJ[a].add(b); ADJ[b].add(a); }
@@ -912,7 +919,7 @@ function renderBattlePanel() {
   box.hidden = false;
   const me = state.player;
   const status = state.over ? '遊戲結束' : state.myTurn ? `你的回合・剩 ${state.attacksLeft} 次出擊` : '其他縣市行動中…';
-  let html = `<div class="bhead"><span class="sw" style="background:${byId[me].color}"></span>
+  let html = `<div class="bhead"><img class="bImg" src="${portrait(me)}" alt="" style="border-color:${byId[me].color}">
     <b>${byId[me].short}・${byId[me].title}</b><span class="bstat">${territories(me).length} 塊領土｜${status}</span></div>`;
   const skills = byId[me].skills;
   const cdTxt = s => state.cd[s.name] ? `冷卻 ${state.cd[s.name]}` : '可用';
@@ -1058,7 +1065,7 @@ function showProfile(id) {
   const myTerr = territories(id);
   const bonds = BONDS.filter(b => b.ids.includes(id));
   document.getElementById('profile').innerHTML = `
-    <div class="phead"><span class="sw" style="background:${c.color}"></span>
+    <div class="phead"><img class="portrait" src="${portrait(id)}" alt="${c.name}角色插畫" style="border-color:${c.color}">
       <div><h2>${c.name}<small>${c.title}</small></h2>
       <div class="sub">${ownerTxt}${myTerr.length ? `・勢力 ${myTerr.length} 塊領土` : '・勢力已滅亡'}</div></div></div>
     <div class="stats">${STAT_LABELS.map(([k, label, color]) => `<span>${label}</span>
@@ -1087,7 +1094,7 @@ function showStart() {
   document.getElementById('banner').hidden = true;
   document.getElementById('start').hidden = false;
   document.getElementById('pickGrid').innerHTML = COUNTIES.map(c => `<button class="pickBtn" data-id="${c.id}">
-    <span class="sw" style="background:${c.color}"></span><b>${c.short}</b><small>${c.title}</small></button>`).join('');
+    <img class="pickImg" src="${portrait(c.id)}" alt="" loading="lazy" style="border-color:${c.color}"><b>${c.short}</b><small>${c.title}</small></button>`).join('');
 }
 
 // ═══════════════ 綁定 ═══════════════
