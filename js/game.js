@@ -90,6 +90,7 @@
       : '📣 22 縣市大亂鬥開始！誰會是最後的贏家？', 'big');
     if (S.diff.aiPeace) log(`🕊️ 前 ${S.diff.aiPeace} 天為和平期：AI 縣市不會主動開戰，趁機招兵、併吞鄰居吧！`, 'event');
     hideModal();
+    if (mode === 'play') focusCounty(player); else map.view.set(MAP_W / 2, MAP_H / 2, 1);
     render();
     runLoop(S.gen);
   }
@@ -732,6 +733,7 @@
       L.g.classList.toggle('capital', f === id);
     }
     for (const b of map.borders) b.el.setAttribute('class', S.owner[b.a] === S.owner[b.b] ? 'b-county' : 'b-owner');
+    renderCards();
     renderPanel();
     renderInfo();
     renderTip();
@@ -808,6 +810,33 @@
         <p class="hint">${stunned(id) ? `😵 被困住了，到第 ${S.stun[id]} 天都無法出兵` : acted ? '⛔ 這個縣市今天已經出兵過了（還能招兵、調兵）' : count(a) ? '👉 點擊<b class="hl-r">閃爍紅框</b>的相鄰敵方縣市進攻' : '先招兵才能出擊'}</p>`;
     }
     box.innerHTML = html;
+  }
+
+  // 地圖上的縣市卡片（放大時顯示）
+  function renderCards() {
+    for (const c of COUNTIES) {
+      const id = c.id, f = S.owner[id], a = S.army[id], card = map.cards[id];
+      card.tag.style.fill = byId[f].color;
+      card.name.textContent = `${c.short} ${count(a)}`;
+      card.g.classList.toggle('mine', S.mode === 'play' && f === S.player);
+      card.g.classList.toggle('selected', id === S.sel);
+      const units = kinds(a).sort((x, y) => UNIT_KEYS.indexOf(U(x).cls) - UNIT_KEYS.indexOf(U(y).cls)).flatMap(k => Array(a[k]).fill(k));
+      card.cells.forEach((cell, i) => {
+        const k = units[i];
+        cell.rect.setAttribute('class', 'ccell' + (k ? ' cls-' + U(k).cls : ''));
+        const sprite = k && U(k).sprite;
+        if (sprite) cell.img.setAttribute('href', sprite);
+        cell.img.style.display = sprite ? '' : 'none';
+        cell.txt.textContent = k && !sprite ? U(k).icon : '';
+      });
+      const slots = slotsOf(id);
+      card.skills.forEach((sk, i) => {
+        const key = slots[i];
+        sk.g.style.display = i < slots.length ? '' : 'none';
+        sk.t.textContent = key ? ALL_SKILLS[key].icon : '＋';
+        sk.g.classList.toggle('cooling', !key || skillWait(id, i) > 0);
+      });
+    }
   }
 
   // 5×5 兵力格：每格一名戰鬥人員
@@ -907,6 +936,12 @@
     if (e.key === 'Enter' || e.key === 'e') endPlayerTurn();
     if (e.key === 'Escape') { S.sel = null; S.transferMode = false; render(); }
   });
+
+  // 小地圖與縮放
+  buildMinimap($('#minimap'), map.view);
+  map.view.onChange(v => { $('#zoom').value = v.z; });
+  $('#zoom').addEventListener('input', e => map.view.zoomTo(+e.target.value));
+  function focusCounty(id, z = 2.6) { const [x, y] = map.labelPos[id]; map.view.set(x, y + 10, z); }
 
   // 開場畫面背後先顯示初始地圖
   initState('idle');

@@ -27,6 +27,13 @@
     </section>
 
     <aside id="side">
+      <div class="card minicard">
+        <div class="minihead"><b>🗺️ 全台地圖</b><small>拖曳地圖或點小地圖移動・滾輪縮放</small></div>
+        <div class="minirow">
+          <svg id="minimap" aria-label="小地圖"></svg>
+          <div class="zoomCol"><span>🔍</span><input type="range" id="zoom" min="1" max="4" step="0.05" value="1" aria-label="縮放"><span>🌏</span></div>
+        </div>
+      </div>
       <div id="mePanel" class="card" hidden>
         <div class="mehead"><span id="meName"></span><span id="meCounties"></span></div>
         <div class="money"><span>💰 <b id="meMoney"></b></span><span id="meIncome"></span></div>

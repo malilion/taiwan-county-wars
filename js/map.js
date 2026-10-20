@@ -64,8 +64,8 @@ function buildMap(svg, onClick, onHover) {
   const delaunay = d3.Delaunay.from(pts);
   const vor = delaunay.voronoi([0, 0, MAP_W, MAP_H]);
 
-  svgEl('path', { d: outlineD, class: 'land-under' }, svg);
-  const land = svgEl('g', { 'clip-path': 'url(#tw-clip)', class: 'land' }, svg);
+  svgEl('path', { d: outlineD, class: 'land-under', id: 'mapUnder' }, svg);
+  const land = svgEl('g', { 'clip-path': 'url(#tw-clip)', class: 'land', id: 'mapLand' }, svg);
   const groups = {};
   COUNTIES.forEach(c => {
     const g = svgEl('g', { class: 'county', 'data-id': c.id }, c.island ? null : land);
@@ -87,10 +87,10 @@ function buildMap(svg, onClick, onHover) {
     const line = svgEl('line', { x1: cc[2 * t1], y1: cc[2 * t1 + 1], x2: cc[2 * t2], y2: cc[2 * t2 + 1] }, borderLayer);
     borders.push({ a, b, el: line });
   }
-  svgEl('path', { d: outlineD, class: 'coast' }, svg);
+  svgEl('path', { d: outlineD, class: 'coast', id: 'mapCoast' }, svg);
 
   // 離島
-  const islandLayer = svgEl('g', { class: 'islands' }, svg);
+  const islandLayer = svgEl('g', { class: 'islands', id: 'mapIslands' }, svg);
   COUNTIES.filter(c => c.island).forEach(c => {
     const g = groups[c.id];
     islandLayer.appendChild(g);
@@ -112,14 +112,121 @@ function buildMap(svg, onClick, onHover) {
     labels[c.id] = { g, ring, dot, num };
   });
 
+  // 放大時顯示的縣市卡片：名牌 + 5×5 兵力格 + 技能圖示（座標單位 = 地圖單位，會跟著縮放）
+  const cardLayer = svgEl('g', { class: 'cards' }, svg);
+  const cards = {};
+  COUNTIES.forEach(c => {
+    const [x, y] = labelPos[c.id];
+    const g = svgEl('g', { class: 'ccard', transform: `translate(${x},${y - 22})`, 'data-id': c.id }, cardLayer);
+    const tag = svgEl('rect', { x: -16, y: 0, width: 32, height: 7.5, rx: 1.6, class: 'ctag' }, g);
+    const name = svgEl('text', { x: 0, y: 5.4, class: 'cname' }, g);
+    svgEl('rect', { x: -14.5, y: 8.8, width: 29, height: 29, rx: 1.2, class: 'cgrid' }, g);
+    const cells = [];
+    for (let i = 0; i < 25; i++) {
+      const cx = -13.6 + (i % 5) * 5.5, cy = 9.7 + Math.floor(i / 5) * 5.5;
+      const rect = svgEl('rect', { x: cx, y: cy, width: 5, height: 5, rx: .6, class: 'ccell' }, g);
+      const img = svgEl('image', { x: cx, y: cy, width: 5, height: 5 }, g);
+      const txt = svgEl('text', { x: cx + 2.5, y: cy + 3.9, class: 'cicon' }, g);
+      cells.push({ rect, img, txt });
+    }
+    const skills = [0, 1].map(i => {
+      const sg = svgEl('g', { transform: `translate(${i ? 1.5 : -8.5},39.5)` }, g);
+      svgEl('rect', { width: 7, height: 7, rx: 1.4, class: 'cskill' }, sg);
+      const t = svgEl('text', { x: 3.5, y: 5.2, class: 'cskillIcon' }, sg);
+      return { g: sg, t };
+    });
+    cards[c.id] = { g, tag, name, cells, skills };
+  });
+
   const fx = svgEl('g', { class: 'fx' }, svg);
 
   for (const id in groups) {
-    for (const target of [groups[id], labels[id].g]) {
+    for (const target of [groups[id], labels[id].g, cards[id].g]) {
       target.addEventListener('click', ev => onClick(id, ev));
       target.addEventListener('mouseenter', () => onHover(id));
       target.addEventListener('mouseleave', () => onHover(null));
     }
   }
-  return { groups, labels, borders, labelPos, fx };
+  const view = makeView(svg);
+  return { groups, labels, borders, labelPos, fx, cards, view };
+}
+
+// ───────── 縮放與拖曳 ─────────
+const ZOOM_CARDS = 1.8; // 放大到這個倍率以上顯示縣市卡片
+function makeView(svg) {
+  const v = { cx: MAP_W / 2, cy: MAP_H / 2, z: 1, w: MAP_W, h: MAP_H, listeners: [] };
+  const clamp = (val, lo, hi) => Math.min(hi, Math.max(lo, val));
+  function apply() {
+    const r = svg.getBoundingClientRect();
+    const aspect = r.width && r.height ? r.width / r.height : MAP_W / MAP_H;
+    let w = MAP_W, h = MAP_H;
+    if (aspect > MAP_W / MAP_H) w = h * aspect; else h = w / aspect;
+    v.w = w / v.z; v.h = h / v.z;
+    v.cx = v.w >= MAP_W ? MAP_W / 2 : clamp(v.cx, v.w / 2, MAP_W - v.w / 2);
+    v.cy = v.h >= MAP_H ? MAP_H / 2 : clamp(v.cy, v.h / 2, MAP_H - v.h / 2);
+    svg.setAttribute('viewBox', `${v.cx - v.w / 2} ${v.cy - v.h / 2} ${v.w} ${v.h}`);
+    svg.classList.toggle('zoomed', v.z >= ZOOM_CARDS);
+    svg.style.setProperty('--z', v.z); // 讓特效文字、箭頭不會跟著放大
+    v.listeners.forEach(fn => fn(v));
+  }
+  v.set = (cx, cy, z = v.z) => { v.cx = cx; v.cy = cy; v.z = clamp(z, 1, 4); apply(); };
+  v.zoomTo = z => v.set(v.cx, v.cy, z);
+  v.onChange = fn => v.listeners.push(fn);
+  v.apply = apply;
+
+  // 拖曳平移（移動超過幾個像素就不算點擊）
+  let drag = null, moved = false;
+  svg.addEventListener('pointerdown', e => {
+    if (e.button !== 0) return;
+    drag = { x: e.clientX, y: e.clientY, cx: v.cx, cy: v.cy };
+    moved = false;
+  });
+  window.addEventListener('pointermove', e => {
+    if (!drag) return;
+    const dx = e.clientX - drag.x, dy = e.clientY - drag.y;
+    if (!moved && Math.hypot(dx, dy) < 5) return;
+    moved = true;
+    svg.classList.add('dragging');
+    const scale = v.w / svg.getBoundingClientRect().width;
+    v.set(drag.cx - dx * scale, drag.cy - dy * scale);
+  });
+  window.addEventListener('pointerup', () => { drag = null; svg.classList.remove('dragging'); });
+  svg.addEventListener('click', e => { if (moved) { e.stopPropagation(); e.preventDefault(); moved = false; } }, true);
+
+  // 滾輪縮放，以游標為中心
+  svg.addEventListener('wheel', e => {
+    e.preventDefault();
+    const r = svg.getBoundingClientRect();
+    const px = v.cx - v.w / 2 + (e.clientX - r.left) / r.width * v.w;
+    const py = v.cy - v.h / 2 + (e.clientY - r.top) / r.height * v.h;
+    const z = Math.min(4, Math.max(1, v.z * (e.deltaY < 0 ? 1.15 : 1 / 1.15)));
+    const k = v.z / z;
+    v.set(px - (px - v.cx) * k, py - (py - v.cy) * k, z);
+  }, { passive: false });
+  window.addEventListener('resize', apply);
+  apply();
+  return v;
+}
+
+// ───────── 小地圖 ─────────
+// 用 <use> 引用主地圖的陸地，顏色會自動同步；方框 = 主畫面目前看到的範圍
+function buildMinimap(mini, view) {
+  mini.setAttribute('viewBox', `0 0 ${MAP_W} ${MAP_H}`);
+  for (const ref of ['mapUnder', 'mapLand', 'mapIslands', 'mapCoast']) svgEl('use', { href: '#' + ref }, mini);
+  const box = svgEl('rect', { class: 'miniBox' }, mini);
+  view.onChange(v => {
+    box.setAttribute('x', v.cx - v.w / 2);
+    box.setAttribute('y', v.cy - v.h / 2);
+    box.setAttribute('width', v.w);
+    box.setAttribute('height', v.h);
+  });
+  view.apply();
+  let down = false;
+  const go = e => {
+    const pt = new DOMPoint(e.clientX, e.clientY).matrixTransform(mini.getScreenCTM().inverse());
+    view.set(pt.x, pt.y, Math.max(view.z, 2));
+  };
+  mini.addEventListener('pointerdown', e => { down = true; mini.setPointerCapture(e.pointerId); go(e); });
+  mini.addEventListener('pointermove', e => { if (down) go(e); });
+  mini.addEventListener('pointerup', () => { down = false; });
 }
