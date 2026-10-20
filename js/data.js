@@ -57,12 +57,13 @@ const REGIONS = [
   { id: 'islands', name: '離島', bonus: 30, ids: ['penghu', 'kinmen', 'lienchiang'] },
 ];
 
-// 兵種：剪刀石頭布 → 機車剋砲兵、砲兵剋八家將、八家將剋阿兵哥、阿兵哥擋機車
+// 兵系相剋：機動剋火砲、火砲剋重甲、重甲剋步兵、步兵擋機動
+// 基本兵種（每個勢力都能招）；cls = 兵系
 const UNITS = {
-  inf: { name: '阿兵哥', icon: '🪖', cost: 10, atk: 3, hp: 5, desc: '便宜耐打，擅長擋機車' },
-  moto: { name: '機車騎士', icon: '🛵', cost: 18, atk: 5, hp: 4, desc: '機動快攻，專衝砲兵陣地' },
-  gen: { name: '八家將', icon: '👺', cost: 26, atk: 7, hp: 7, desc: '廟口精銳，壓制阿兵哥' },
-  art: { name: '砲兵', icon: '💣', cost: 34, atk: 11, hp: 3, desc: '火力最強，但怕被近身' },
+  inf: { name: '阿兵哥', icon: '🪖', cost: 10, atk: 3, hp: 5, cls: 'inf', desc: '便宜耐打，擅長擋機車' },
+  moto: { name: '機車騎士', icon: '🛵', cost: 18, atk: 5, hp: 4, cls: 'moto', desc: '機動快攻，專衝砲兵陣地' },
+  gen: { name: '八家將', icon: '👺', cost: 26, atk: 7, hp: 7, cls: 'gen', desc: '廟口精銳，壓制阿兵哥' },
+  art: { name: '砲兵', icon: '💣', cost: 34, atk: 11, hp: 3, cls: 'art', desc: '火力最強，但怕被近身' },
 };
 const UNIT_KEYS = ['inf', 'moto', 'gen', 'art'];
 const COUNTERS = { moto: 'art', art: 'gen', gen: 'inf', inf: 'moto' };
@@ -88,3 +89,48 @@ const DIFFICULTY = {
   normal: { name: '普通', desc: '前 6 天和平，之後各縣市開始蠢蠢欲動', playerPeace: 6, aiPeace: 6, aiVsAi: 0.6, aggr: 1.15 },
   hard: { name: '困難', desc: '第一天就開打的大亂鬥', playerPeace: 0, aiPeace: 0, aiVsAi: 1, aggr: 1 },
 };
+
+// 自組兵種：武器 + 防具 + 坐騎 → 能力值；兵系決定相剋（坐騎是車 → 機動系、遠程武器 → 火砲系、重甲 → 重甲系、其他 → 步兵系）
+const PARTS = {
+  weapon: [
+    { id: 'fist', name: '拳頭', icon: '👊', atk: 0, cost: 0 },
+    { id: 'cane', name: '藤條', icon: '🎋', atk: 2, cost: 3 },
+    { id: 'knife', name: '西瓜刀', icon: '🔪', atk: 4, cost: 7 },
+    { id: 'guandao', name: '關刀', icon: '🗡️', atk: 6, cost: 12 },
+    { id: 'firecracker', name: '鞭炮', icon: '🧨', atk: 5, cost: 9, ranged: true },
+    { id: 'beehive', name: '鹽水蜂炮', icon: '🎆', atk: 9, cost: 17, ranged: true },
+  ],
+  armor: [
+    { id: 'tank', name: '白色汗衫', icon: '🎽', hp: 0, cost: 0 },
+    { id: 'hat', name: '斗笠', icon: '👒', hp: 2, cost: 3 },
+    { id: 'helmet', name: '安全帽', icon: '⛑️', hp: 3, cost: 5 },
+    { id: 'vest', name: '防彈背心', icon: '🦺', hp: 5, cost: 10, heavy: true },
+    { id: 'god', name: '神明護體', icon: '🛕', hp: 8, cost: 18, heavy: true },
+  ],
+  mount: [
+    { id: 'walk', name: '步行', icon: '🚶', atk: 0, hp: 0, cost: 0 },
+    { id: 'bike', name: '腳踏車', icon: '🚲', atk: 1, hp: 0, cost: 3 },
+    { id: 'scooter', name: '機車', icon: '🛵', atk: 2, hp: 0, cost: 7, vehicle: true },
+    { id: 'truck', name: '發財車', icon: '🛻', atk: 1, hp: 3, cost: 11, vehicle: true },
+    { id: 'tractor', name: '鐵牛車', icon: '🚜', atk: 3, hp: 2, cost: 14, vehicle: true },
+  ],
+};
+const PART_LABELS = { weapon: '武器', armor: '防具', mount: '坐騎' };
+const UNIT_CLASSES = { inf: '步兵系', moto: '機動系', gen: '重甲系', art: '火砲系' };
+const UNIT_ICONS = ['🪖', '🥷', '🦸', '🧙', '🐯', '🐉', '🐔', '🍍', '👹', '🤖', '🧋', '🦀', '🐟', '🥭', '🌶️', '🔥'];
+const DESIGN_FEE = 60;
+const MAX_CUSTOM_UNITS = 4;
+
+function designUnit(weaponId, armorId, mountId) {
+  const w = PARTS.weapon.find(p => p.id === weaponId);
+  const a = PARTS.armor.find(p => p.id === armorId);
+  const m = PARTS.mount.find(p => p.id === mountId);
+  const cls = m.vehicle ? 'moto' : w.ranged ? 'art' : a.heavy ? 'gen' : 'inf';
+  return {
+    atk: 1 + w.atk + m.atk,
+    hp: 2 + a.hp + m.hp,
+    cost: 6 + Math.round((w.cost + a.cost + m.cost) * 1.3),
+    cls,
+    parts: [w.name, a.name, m.name],
+  };
+}
