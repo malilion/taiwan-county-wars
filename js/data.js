@@ -162,3 +162,12 @@ const REGION_SKILLS = {
   kinmen: { name: '金門砲擊', icon: '💥', type: 'strike', value: 0.3, cd: 4, desc: '老砲台開火，最強的相鄰敵方縣市損失 30% 兵力' },
   lienchiang: { name: '藍眼淚幻術', icon: '✨', type: 'stun', cd: 5, desc: '相鄰敵方縣市看藍眼淚看呆了，到明天都無法出兵' },
 };
+
+// 通用技能：一開始就在技能庫，可以裝到任何技能欄
+const COMMON_SKILLS = {
+  c_build: { name: '地方建設', icon: '🏗️', type: 'money', value: 60, cd: 3, desc: '蓋了一座新的運動中心，進帳 60 萬' },
+  c_draft: { name: '替代役徵召', icon: '🪖', type: 'recruit', unit: 'inf', value: 3, cd: 3, desc: '免費徵召 3 名阿兵哥' },
+  c_guard: { name: '全民防衛', icon: '🛡️', type: 'def', value: 1.3, cd: 3, desc: '鄉親一起守家園，本縣防禦 ×1.3 到明天' },
+  c_market: { name: '夜市補給', icon: '🍢', type: 'atk', value: 1.25, cd: 3, desc: '吃飽再出發，本縣下一次進攻攻擊 ×1.25' },
+};
+const ALL_SKILLS = { ...REGION_SKILLS, ...COMMON_SKILLS };
