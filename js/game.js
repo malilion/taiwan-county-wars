@@ -26,11 +26,12 @@
   const isFront = id => enemiesOf(id).length > 0;
   const fTag = f => `<b style="color:${byId[f].color}">${byId[f].short}</b>`;
   const cTag = id => `<span class="ctag">${byId[id].short}</span>`;
+  const unitIcon = (k, cls = 'unit-sprite') => U(k).sprite ? `<img class="${cls}" src="${U(k).sprite}" alt="">` : U(k).icon;
   const unitCost = (k, id) => Math.round(U(k).cost * (byId[id].cheap === U(k).cls ? 0.8 : 1));
   const unitsOf = f => [...UNIT_KEYS, ...Object.keys(S.units).filter(k => S.units[k].owner === f)];
   const customOf = f => Object.keys(S.units).filter(k => S.units[k].owner === f);
   const armyHtml = a => kinds(a).length
-    ? kinds(a).map(k => `<span title="${U(k).name}（${UNIT_CLASSES[U(k).cls]}）">${U(k).icon}<b>${a[k]}</b></span>`).join('')
+    ? kinds(a).map(k => `<span title="${U(k).name}（${UNIT_CLASSES[U(k).cls]}）">${unitIcon(k)}<b>${a[k]}</b></span>`).join('')
     : '<span class="emptyArmy">空城</span>';
   const researchCost = (f, k) => 120 * (S.research[f][k] + 1);
 
@@ -176,6 +177,8 @@
     await wait(0.9, gen);
     const r = resolveBattle(src, tgt, sent);
     clearArrows();
+    battleBurst(src, 'attack');
+    battleBurst(tgt, r.win ? 'win' : 'block');
     if (r.win) {
       S.owner[tgt] = fa;
       S.army[tgt] = r.A;
@@ -479,6 +482,17 @@
     t.textContent = text;
     setTimeout(() => t.remove(), 1200);
   }
+  function battleBurst(id, outcome) {
+    if (S.speed >= 99) return;
+    const [x, y] = map.labelPos[id];
+    const points = Array.from({ length: 16 }, (_, i) => {
+      const angle = -Math.PI / 2 + i * Math.PI / 8;
+      const radius = i % 2 ? 9 : 22;
+      return `${x + Math.cos(angle) * radius},${y + Math.sin(angle) * radius}`;
+    }).join(' ');
+    const burst = svgEl('polygon', { points, class: `battle-burst ${outcome}` }, map.fx);
+    setTimeout(() => burst.remove(), 700);
+  }
   function flash(msg) {
     const el = $('#toast');
     el.textContent = msg;
@@ -562,14 +576,14 @@
     const c = byId[id], f = S.owner[id], a = S.army[id];
     const isMineSel = playerActive() && id === S.sel && f === S.player;
     const region = REGIONS.find(r => r.id === c.region);
-    let html = `<div class="ihead"><span class="sw big" style="background:${byId[f].color}"></span>
-      <div><h3>${c.name} <small>${c.nick}</small></h3><div class="sub">${region.name}・稅收 ${c.econ} 萬・控制者 ${fTag(f)}</div></div></div>
+    let html = `<div class="county-hero">${c.portrait ? `<img class="county-portrait" src="${c.portrait}" alt="${c.name}角色插畫">` : ''}<div class="ihead"><span class="sw big" style="background:${byId[f].color}"></span>
+      <div><h3>${c.name} <small>${c.nick}</small></h3><div class="sub">${region.name}・稅收 ${c.econ} 萬・控制者 ${fTag(f)}</div></div></div></div>
       <div class="trait">✨ ${c.trait}</div>
       <div class="army">${armyHtml(a)}</div>`;
     if (isMineSel) {
       const acted = S.acted.has(id);
       html += `<div class="recruit">${unitsOf(f).map(k => `<button data-u="${k}" class="${U(k).owner ? 'custom' : ''}" ${S.money[f] < unitCost(k, id) ? 'disabled' : ''} title="${U(k).desc}">
-        ${U(k).icon} ${U(k).name}<br><small>${unitCost(k, id)} 萬・攻${U(k).atk}/血${U(k).hp}・${UNIT_CLASSES[U(k).cls]}</small></button>`).join('')}</div>
+        ${unitIcon(k)} ${U(k).name}<br><small>${unitCost(k, id)} 萬・攻${U(k).atk}/血${U(k).hp}・${UNIT_CLASSES[U(k).cls]}</small></button>`).join('')}</div>
         <label class="half"><input type="checkbox" id="halfChk" ${S.sendHalf ? 'checked' : ''}> 只派一半兵力（其餘留守）</label>
         <p class="hint">${acted ? '⛔ 這個縣市今天已經行動過了（還能招兵）' : count(a) ? '👉 點擊<b class="hl-r">閃爍紅框</b>的相鄰縣市進攻，或<b class="hl-g">綠框</b>己方縣市調兵' : '先招兵才能出擊'}</p>`;
     }

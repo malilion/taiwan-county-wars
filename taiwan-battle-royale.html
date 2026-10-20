@@ -24,9 +24,7 @@
     flex: 1; min-width: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 8px;
     background: radial-gradient(ellipse at 60% 40%, #17345f 0%, #0f2240 55%, var(--bg) 100%);
   }
-  #map { width: 100%; flex: 1; min-height: 0; max-height: calc(100vh - 90px); }
-  .credit { font-size: 11px; color: var(--muted); opacity: .7; }
-  .credit a { color: inherit; }
+  #map { width: 100%; flex: 1; min-height: 0; max-height: calc(100vh - 70px); }
   aside { width: 400px; flex-shrink: 0; padding: 12px; display: flex; flex-direction: column; gap: 10px; border-left: 1px solid var(--line); overflow-y: auto; }
   .card { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 12px; }
   .card h3 { margin: 0 0 8px; font-size: 14px; color: var(--muted); }
@@ -103,6 +101,53 @@
   #banner h2 { margin: 0 0 8px; font-size: 32px; }
   #banner p { color: var(--muted); margin: 0 0 16px; }
 
+  .county.mine { stroke: #ffd166; stroke-width: 1.6; }
+  .county.src { stroke: #fff; stroke-width: 2.6; }
+  .county.canhit { animation: canhit 1s infinite; }
+  .county.tgt { stroke: #ef476f; stroke-width: 3; animation: canhit .6s infinite; }
+  @keyframes canhit { 50% { fill-opacity: .45; } }
+  .pop { font-size: 18px; font-weight: 900; text-anchor: middle; paint-order: stroke; stroke: #000; stroke-width: 4px; pointer-events: none; animation: pop 1.2s ease-out forwards; }
+  @keyframes pop { 0% { transform: translateY(6px); opacity: 0; } 15% { opacity: 1; } 100% { transform: translateY(-20px); opacity: 0; } }
+  body.battleMode #stepBtn, body.battleMode #autoBtn, body.battleMode .opts label:last-child { display: none; }
+  body.battleMode .ctrls { grid-template-columns: 1fr; }
+  .card.battle { border-color: #ff8c42; }
+  .bhead { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+  .bhead .sw { width: 16px; height: 16px; border-radius: 4px; }
+  .bstat { font-size: 12px; color: var(--muted); margin-left: auto; }
+  .bvs { margin: 10px 0 6px; font-size: 14px; }
+  .odds { display: flex; align-items: center; gap: 8px; }
+  .odds b { font-size: 20px; color: var(--accent); width: 52px; text-align: right; }
+  .obar { flex: 1; height: 12px; background: #3a1d2a; border-radius: 6px; overflow: hidden; }
+  .obar i { display: block; height: 100%; background: linear-gradient(90deg, #ef476f, #ffd166, #06d6a0); transition: width .3s; }
+  .card.battle .notes { font-size: 12px; color: var(--muted); margin: 6px 0; }
+  .skills { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; margin: 8px 0; }
+  .skills button { font-size: 13px; padding: 6px; line-height: 1.35; }
+  .skills small { display: block; font-size: 11px; color: var(--muted); }
+  .skills button.on small { color: #333; }
+  .bbtns { display: grid; grid-template-columns: 2fr 1fr; gap: 6px; }
+  .defs { font-size: 12px; color: #8ecae6; margin: 10px 0 8px; }
+  #endTurnBtn { width: 100%; }
+  .row.me .nm { color: var(--accent); }
+  .entry.me { background: rgba(255, 209, 102, .07); }
+  #toast {
+    position: fixed; left: 50%; top: 64px; transform: translateX(-50%); z-index: 6;
+    background: var(--red); color: #fff; padding: 8px 18px; border-radius: 20px; font-weight: 700;
+    opacity: 0; transition: opacity .2s; pointer-events: none;
+  }
+  #toast.show { opacity: 1; }
+  #start { position: fixed; inset: 0; display: flex; align-items: center; justify-content: center; background: rgba(5, 10, 20, .8); z-index: 7; padding: 16px; }
+  #start[hidden] { display: none; }
+  #start .box { background: var(--panel); border: 1px solid var(--line); border-radius: 16px; padding: 24px; width: min(720px, 100%); max-height: 92vh; overflow-y: auto; }
+  #start h2 { margin: 0; text-align: center; font-size: 28px; }
+  #start .tag { text-align: center; color: var(--muted); margin: 6px 0 16px; }
+  #start h3 { font-size: 15px; margin: 0 0 8px; }
+  #pickGrid { display: grid; grid-template-columns: repeat(auto-fill, minmax(120px, 1fr)); gap: 6px; }
+  .pickBtn { display: flex; align-items: center; gap: 6px; padding: 6px 8px; text-align: left; }
+  .pickBtn .sw { width: 12px; height: 12px; border-radius: 3px; flex-shrink: 0; }
+  .pickBtn small { color: var(--muted); font-size: 11px; }
+  button.wide { width: 100%; margin-top: 12px; padding: 10px; }
+  .rules { color: var(--muted); font-size: 13px; padding-left: 18px; margin: 14px 0 0; line-height: 1.6; }
+
   @media (max-width: 860px) {
     main { flex-direction: column; }
     #mapWrap { height: 78vh; flex: none; }
@@ -119,14 +164,13 @@
 <main>
   <section id="mapWrap">
     <svg id="map" role="img" aria-label="台灣 22 縣市地圖"></svg>
-    <div class="credit">地圖資料：<a href="https://github.com/dkaoster/taiwan-atlas" target="_blank" rel="noopener">taiwan-atlas</a>（MIT © Daniel Kao，原始資料：內政部國土測繪中心）・金門、馬祖為示意位置</div>
   </section>
   <aside>
     <div class="card">
       <div class="ctrls">
         <button id="stepBtn" class="primary">⏭ 單步執行</button>
         <button id="autoBtn">▶ 自動播放</button>
-        <button id="resetBtn">↺ 重置</button>
+        <button id="resetBtn">↺ 新遊戲</button>
       </div>
       <div class="opts">
         <label><input type="checkbox" id="weighted" checked> 勝率依領土數微調</label>
@@ -134,6 +178,7 @@
         <label>速度 <input type="range" id="speed" min="1" max="10" value="5"></label>
       </div>
     </div>
+    <div class="card battle" id="battlePanel" hidden></div>
     <div class="card" id="profile"></div>
     <div class="card">
       <h3 id="boardTitle">存活縣市排行榜</h3>
@@ -145,6 +190,23 @@
     </div>
   </aside>
 </main>
+<div id="toast"></div>
+<div id="start" hidden>
+  <div class="box">
+    <h2>🇹🇼 台灣 22 縣市大亂鬥</h2>
+    <p class="tag">選一個縣市親自上陣，或是坐著看 22 縣市互相吞併。</p>
+    <h3>⚔️ 戰鬥模式：選擇你的縣市</h3>
+    <div id="pickGrid"></div>
+    <button id="watchBtn" class="wide">👀 觀戰模擬（AI 大亂鬥）</button>
+    <ul class="rules">
+      <li>每回合點相鄰的敵方縣市進攻，可以選擇發動進攻必殺技（用完要冷卻 3 回合）。</li>
+      <li>戰鬥模式是<b>一塊一塊</b>爭奪領土；觀戰模擬則是勝者吞併敗者整個勢力。</li>
+      <li>被攻擊時，冷卻好的防守必殺技會自動發動；守自己的老家有主場優勢。前 3 回合是和平期，其他縣市不會打你。</li>
+      <li>每 5 塊領土每回合多一次出擊；但你越大，其他縣市越會聯手圍剿你。</li>
+      <li>打下全部 22 縣市，或集齊六都守住 5 回合就獲勝；領土全部被打下就輸了。</li>
+    </ul>
+  </div>
+</div>
 <div id="banner" hidden>
   <div class="box">
     <h2 id="bannerTitle"></h2>
@@ -155,6 +217,8 @@
 
 <script>
 // ═══════════════ 地圖形狀（由 taiwan-atlas counties-10t 簡化、投影後內嵌） ═══════════════
+// 地圖資料：taiwan-atlas https://github.com/dkaoster/taiwan-atlas（MIT License, Copyright (c) 2020 Daniel Kao）
+// 原始資料：內政部國土測繪中心
 const SHAPES = {
   insets: {"lienchiang": {"x": 34, "y": 48, "w": 218.4, "h": 172.4}, "kinmen": {"x": 34, "y": 268, "w": 151.4, "h": 79.5}},
   shapes: {
@@ -509,23 +573,35 @@ const LOSE_QUIPS = [
 ];
 
 // ═══════════════ 狀態 ═══════════════
+// mode：'sim' 觀戰模擬（敗者整個勢力被吞併）／'battle' 戰鬥模式（玩家操控一個縣市，逐塊爭奪領土）
 let state;
 let autoTimer = null;
 let pickedId = 'taipei';
+const AI_BATTLES_PER_TURN = 3;   // 戰鬥模式中，玩家每回合結束後 AI 打幾場
+const PEACE_ROUNDS = 3;          // 戰鬥模式前幾回合 AI 不會打玩家
+const SKILL_CD = 3;              // 必殺技冷卻回合數
 
-function reset() {
+function newGame(mode, player = null) {
   stopAuto();
   state = {
-    round: 0,
+    mode, player, round: 0,
     owner: Object.fromEntries(COUNTIES.map(c => [c.id, c.id])),
-    miaoliUsed: false,
-    sixHolder: null,
-    over: false,
+    miaoliUsed: false, sixHolder: null, over: false,
+    // 戰鬥模式
+    myTurn: false, busy: false, attacksLeft: 0, src: null, tgt: null, chosen: null, cd: {},
   };
   document.getElementById('log').innerHTML = '';
   document.getElementById('banner').hidden = true;
-  log('📣 22 縣市大亂鬥開打！最後只能留下一個。點地圖上的縣市可以看角色設定。', 'big');
-  render();
+  document.getElementById('start').hidden = true;
+  document.body.classList.toggle('battleMode', mode === 'battle');
+  if (mode === 'battle') {
+    pickedId = player;
+    log(`📣 ${fTag(player)}・${byId[player].title} 宣布出征！一塊一塊打下全台 22 縣市吧。（前 ${PEACE_ROUNDS} 回合為和平期，其他縣市不會打你）`, 'big');
+    startPlayerTurn();
+  } else {
+    log('📣 22 縣市大亂鬥開打！最後只能留下一個。點地圖上的縣市可以看角色設定。', 'big');
+    render();
+  }
 }
 
 const alive = () => [...new Set(Object.values(state.owner))];
@@ -535,6 +611,8 @@ const fTag = f => `<span class="ftag" style="color:${byId[f].color}">${byId[f].s
 const fill = (tpl, A, D) => tpl.replaceAll('{A}', byId[A].short).replaceAll('{D}', byId[D].short);
 const pct = v => `${v > 0 ? '+' : ''}${Math.round(v * 100)}%`;
 const activeBonds = f => BONDS.filter(b => b.ids.every(id => state.owner[id] === f));
+const sleep = ms => new Promise(r => setTimeout(r, ms));
+const isBattle = () => state.mode === 'battle';
 
 // ═══════════════ 勝率計算 ═══════════════
 // 回傳攻方勝率與加成明細
@@ -545,7 +623,7 @@ function calcOdds(A, D, fromId, toId) {
   const add = (v, label) => { if (v) { p += v; notes.push(`${label} ${pct(v)}`); } };
   // 武力 vs 戰場縣市的地形防禦
   let p = 0.5 + (byId[A].stats.atk - byId[toId].stats.def) / 300;
-  if (document.getElementById('weighted').checked) add((nA - nD) * 0.025, '領土差');
+  if (document.getElementById('weighted').checked) add(Math.max(-0.1, Math.min(0.1, (nA - nD) * 0.025)), '領土差');
   add(byId[A].passive.mod({ role: 'atk', sea, toId, nSelf: nA, nOther: nD }), byId[A].passive.name);
   add(-byId[D].passive.mod({ role: 'def', sea, toId, nSelf: nD, nOther: nA }), byId[D].passive.name);
   // 宿敵：雙方互相列為宿敵且數值相同時會抵銷，就不顯示
@@ -559,10 +637,12 @@ function calcOdds(A, D, fromId, toId) {
   if (owns(A, 'kaohsiung') && sea) add(0.1, STRATEGIC.kaohsiung.name);
   if (owns(D, 'nantou')) add(-0.05, STRATEGIC.nantou.name);
   if (toId === 'kinmen') add(-0.15, STRATEGIC.kinmen.name);
+  if (isBattle() && D === state.player && toId === state.player) add(-0.1, '主場優勢');
   return { p, notes, sea, nA, nD };
 }
+const clampP = p => Math.min(0.9, Math.max(0.1, p));
 
-// ═══════════════ 一回合 ═══════════════
+// ═══════════════ 觀戰模擬：一回合 ═══════════════
 function step() {
   if (state.over) return;
   state.round++;
@@ -596,19 +676,31 @@ function checkSixCities() {
   }
 }
 
-function pickAttacker() {
-  // 有敵對鄰居的勢力才能當攻方；佔領台北（首都光環）的勢力權重 ×1.5
-  const cands = alive().filter(f => territories(f).some(id => [...ADJ[id]].some(n => state.owner[n] !== f)));
+// 某勢力可以進攻的 [出兵縣市, 目標縣市]；戰鬥模式和平期內 AI 不打玩家
+function frontsOf(A) {
+  const out = [];
+  for (const id of territories(A)) for (const n of ADJ[id]) {
+    const D = state.owner[n];
+    if (D === A) continue;
+    if (isBattle() && D === state.player && state.round <= PEACE_ROUNDS) continue;
+    out.push([id, n]);
+  }
+  return out;
+}
+
+function pickAttacker(exclude = null) {
+  // 有可進攻目標的勢力才能當攻方；佔領台北（首都光環）的勢力權重 ×1.5
+  const cands = alive().filter(f => f !== exclude && frontsOf(f).length);
+  if (!cands.length) return null;
   const w = cands.map(f => owns(f, 'taipei') ? 1.5 : 1);
   let r = Math.random() * w.reduce((a, b) => a + b, 0);
   for (let i = 0; i < cands.length; i++) { r -= w[i]; if (r <= 0) return cands[i]; }
   return cands[cands.length - 1];
 }
 
-function battle(A) {
-  const fronts = [];
-  for (const id of territories(A)) for (const n of ADJ[id]) if (state.owner[n] !== A) fronts.push([id, n]);
-  const [fromId, toId] = pick(fronts);
+// 一場戰鬥。fromId/toId 不給就隨機挑；atkSkill 給了就是玩家指定的必殺技。回傳 'win' | 'lose' | 'cancel'
+function battle(A, fromId, toId, atkSkill) {
+  if (!fromId) [fromId, toId] = pick(frontsOf(A));
   const D = state.owner[toId];
   const R = `<span class="r">R${state.round}</span>`;
   const o = calcOdds(A, D, fromId, toId);
@@ -620,53 +712,181 @@ function battle(A) {
     const ev = pick(EVENTS.filter(e => e.when(A, D)));
     log(R + ev.text, 'event');
     if (ev.once) state[ev.once] = true;
-    if (ev.effect === 'cancel') return;
+    if (ev.effect === 'cancel') return 'cancel';
     if (ev.effect === 'defend') forced = false;
     else { p += ev.effect; o.notes.push(`事件 ${pct(ev.effect)}`); }
   }
-  // 必殺技：神秘度越高越容易發動
-  const atkSkill = Math.random() < byId[A].stats.meme / 260 ? pick(byId[A].skills.filter(s => s.role === 'atk')) : null;
+  // 進攻必殺：玩家自己選；AI 依神秘度機率發動
+  if (A !== state.player && Math.random() < byId[A].stats.meme / 260) atkSkill = pick(byId[A].skills.filter(s => s.role === 'atk'));
   if (atkSkill && forced === null) {
     log(`${R}✨ ${fTag(A)} 發動必殺技「${atkSkill.name}」：${atkSkill.desc}！`, 'skill');
     p += atkSkill.effect;
     o.notes.push(`${atkSkill.name} ${pct(atkSkill.effect)}`);
   }
-  const defSkill = Math.random() < byId[D].stats.meme / 320 ? pick(byId[D].skills.filter(s => s.role === 'def')) : null;
+  // 防守必殺：玩家的冷卻好了就自動發動；AI 依神秘度機率發動
+  let defSkill = null;
+  if (isBattle() && D === state.player) {
+    defSkill = byId[D].skills.find(s => s.role === 'def' && !state.cd[s.name]) || null;
+    if (defSkill) state.cd[defSkill.name] = SKILL_CD;
+  } else if (Math.random() < byId[D].stats.meme / 320) {
+    defSkill = pick(byId[D].skills.filter(s => s.role === 'def'));
+  }
   if (defSkill && forced === null) {
     log(`${R}🛡️ ${fTag(D)} 發動必殺技「${defSkill.name}」：${defSkill.desc}！`, 'skill');
-    if (defSkill.effect === 'cancel') return;
+    if (defSkill.effect === 'cancel') return 'cancel';
     if (defSkill.effect === 'defend') forced = false;
     else { p -= defSkill.effect; o.notes.push(`${defSkill.name} ${pct(-defSkill.effect)}`); }
   }
-  p = Math.min(0.9, Math.max(0.1, p));
+  p = clampP(p);
 
   const win = forced ?? Math.random() < p;
   const via = o.sea ? '渡海' : '';
   const notes = `<span class="notes">${o.notes.join('｜') || '無加成'}｜攻方勝率 ${Math.round(p * 100)}%</span>`;
+  const cls = isBattle() && (A === state.player || D === state.player) ? 'me' : '';
   if (win) {
-    const lost = territories(D);
+    // 觀戰模擬：吞併整個勢力；戰鬥模式：只拿下這一塊
+    const lost = isBattle() ? [toId] : territories(D);
     lost.forEach(id => { state.owner[id] = A; });
-    log(`${R}⚔️ ${fTag(A)} 從 ${byId[fromId].short} ${via}出兵攻破 ${byId[toId].short}，${fTag(D)} 勢力 ${lost.length} 塊領土全數併入！
-      ${notes}<span class="quip">${fill(pick(WIN_QUIPS), A, D)}</span>`);
+    log(`${R}⚔️ ${fTag(A)} 從 ${byId[fromId].short} ${via}出兵攻破 ${byId[toId].short}${isBattle() ? `（原屬 ${fTag(D)}）` : `，${fTag(D)} 勢力 ${lost.length} 塊領土全數併入`}！
+      ${notes}<span class="quip">${fill(pick(WIN_QUIPS), A, D)}</span>`, cls);
+    popText(toId, A === state.player ? '攻陷！' : D === state.player ? '失守！' : '攻陷', A === state.player ? '#ffd166' : D === state.player ? '#ef476f' : '#fff');
     for (const id of lost) if (STRATEGIC[id]) log(`🏯 ${fTag(A)} 取得戰略要地 ${byId[id].short}「${STRATEGIC[id].name}」：${STRATEGIC[id].desc}`, 'skill');
-    if (alive().length === 1) return finish(A, `第 ${state.round} 回合統一全台！全台改用 ${byId[A].short} 的垃圾車音樂。`);
-    log(`💀 ${byId[D].short} 出局，剩 ${alive().length} 個縣市勢力。`, 'big');
-  } else {
-    log(`${R}🛡️ ${fTag(D)} 在 ${byId[toId].short} 擋下了 ${fTag(A)} 的${via}進攻！
-      ${notes}<span class="quip">${fill(pick(LOSE_QUIPS), A, D)}</span>`);
+    if (alive().length === 1) { finish(A, `第 ${state.round} 回合統一全台！全台改用 ${byId[A].short} 的垃圾車音樂。`); return 'win'; }
+    if (!territories(D).length) {
+      log(`💀 ${byId[D].short} 出局，剩 ${alive().length} 個縣市勢力。`, 'big');
+      if (isBattle() && D === state.player) finish(A, `第 ${state.round} 回合，${byId[A].short} 攻下了你的最後一塊領土。`);
+    }
+    return 'win';
   }
+  log(`${R}🛡️ ${fTag(D)} 在 ${byId[toId].short} 擋下了 ${fTag(A)} 的${via}進攻！
+    ${notes}<span class="quip">${fill(pick(LOSE_QUIPS), A, D)}</span>`, cls);
+  popText(toId, '守住！', '#8ecae6');
+  return 'lose';
 }
 
 function finish(w, text) {
   state.over = true;
+  state.myTurn = false;
   stopAuto();
   render();
+  const won = !isBattle() || w === state.player;
   log(`👑 ${fTag(w)} ${text}`, 'big');
-  document.getElementById('bannerTitle').innerHTML = `👑 ${byId[w].short}・${byId[w].title} 稱霸台灣！`;
-  document.getElementById('bannerTitle').style.color = byId[w].color;
-  document.getElementById('bannerText').textContent = `${byId[w].name}在${text}`;
+  const title = document.getElementById('bannerTitle');
+  if (isBattle()) title.innerHTML = won ? `🎉 ${byId[w].short}・${byId[w].title} 統一台灣！` : `💀 ${byId[state.player].short} 被消滅了`;
+  else title.innerHTML = `👑 ${byId[w].short}・${byId[w].title} 稱霸台灣！`;
+  title.style.color = won ? byId[w].color : '#ef476f';
+  document.getElementById('bannerText').textContent = isBattle() && !won ? text : `${byId[w].name}在${text}`;
   document.getElementById('banner').hidden = false;
   showProfile(w);
+}
+
+// ═══════════════ 戰鬥模式：玩家回合 ═══════════════
+function startPlayerTurn() {
+  if (state.over) return;
+  state.round++;
+  for (const k in state.cd) if (state.cd[k] > 0) state.cd[k]--;
+  // 每 5 塊領土多一次出擊；晶片科技霸權（佔領新竹市）再 +1
+  state.attacksLeft = 1 + Math.floor(territories(state.player).length / 5) + (owns(state.player, 'hsinchucity') ? 1 : 0);
+  state.myTurn = true;
+  state.src = state.tgt = state.chosen = null;
+  log(`<span class="r">R${state.round}</span>🌅 你的回合！點地圖上相鄰的敵方縣市準備進攻${state.attacksLeft > 1 ? `（本回合可出擊 ${state.attacksLeft} 次）` : ''}。`, 'me');
+  render();
+}
+
+function onMapClick(id) {
+  showProfile(id);
+  if (!isBattle() || !state.myTurn || state.busy || state.over) return;
+  const me = state.player;
+  if (state.owner[id] === me) {
+    state.src = id;
+    state.tgt = null;
+  } else {
+    // 點敵方縣市：優先用目前選的出兵縣市，否則自動找一塊相鄰的己方領土
+    const src = state.src && ADJ[state.src].has(id) ? state.src : territories(me).find(t => ADJ[t].has(id));
+    if (!src) { toast('這裡跟你的領土不相鄰，打不到'); return; }
+    state.src = src;
+    state.tgt = id;
+    state.chosen = null;
+  }
+  render();
+}
+
+async function playerAttack() {
+  if (!state.myTurn || state.busy || !state.tgt) return;
+  state.busy = true;
+  const skill = state.chosen ? byId[state.player].skills.find(s => s.name === state.chosen) : null;
+  if (skill) state.cd[skill.name] = SKILL_CD;
+  const tgt = state.tgt;
+  const result = battle(state.player, state.src, tgt, skill);
+  state.attacksLeft--;
+  state.tgt = state.chosen = null;
+  if (result === 'win') state.src = tgt;
+  render();
+  await sleep(700);
+  state.busy = false;
+  if (state.over) return;
+  if (state.attacksLeft > 0) {
+    if (!state.over) checkSixCities();
+    render();
+  } else {
+    endPlayerTurn();
+  }
+}
+
+async function endPlayerTurn() {
+  if (!state.myTurn || state.over) return;
+  state.myTurn = false;
+  state.src = state.tgt = state.chosen = null;
+  state.busy = true;
+  render();
+  // AI 階段
+  for (let i = 0; i < AI_BATTLES_PER_TURN && !state.over; i++) {
+    await sleep(Math.max(350, delay()));
+    // 圍剿：玩家越大，其他縣市越常聯手打玩家
+    const gang = state.round > PEACE_ROUNDS && Math.random() < Math.min(0.5, territories(state.player).length / 14);
+    const hits = gang ? alive().filter(f => f !== state.player).flatMap(f => frontsOf(f).filter(([, t]) => state.owner[t] === state.player).map(fr => [f, ...fr])) : [];
+    if (hits.length) {
+      const [A, from, to] = pick(hits);
+      battle(A, from, to);
+    } else {
+      const A = pickAttacker(state.player);
+      if (!A) break;
+      battle(A);
+    }
+    render();
+  }
+  if (!state.over) checkSixCities();
+  state.busy = false;
+  if (!state.over) { await sleep(300); startPlayerTurn(); }
+}
+
+function renderBattlePanel() {
+  const box = document.getElementById('battlePanel');
+  if (!isBattle()) { box.hidden = true; return; }
+  box.hidden = false;
+  const me = state.player;
+  const status = state.over ? '遊戲結束' : state.myTurn ? `你的回合・剩 ${state.attacksLeft} 次出擊` : '其他縣市行動中…';
+  let html = `<div class="bhead"><span class="sw" style="background:${byId[me].color}"></span>
+    <b>${byId[me].short}・${byId[me].title}</b><span class="bstat">${territories(me).length} 塊領土｜${status}</span></div>`;
+  const skills = byId[me].skills;
+  const cdTxt = s => state.cd[s.name] ? `冷卻 ${state.cd[s.name]}` : '可用';
+  if (state.myTurn && state.tgt) {
+    const D = state.owner[state.tgt];
+    const o = calcOdds(me, D, state.src, state.tgt);
+    const sk = skills.find(s => s.name === state.chosen);
+    const p = clampP(o.p + (sk ? sk.effect : 0));
+    html += `<div class="bvs">從 <b>${byId[state.src].short}</b> ${o.sea ? '渡海' : ''}進攻 <b style="color:${byId[D].color}">${byId[state.tgt].short}</b>（${byId[D].short} 勢力）</div>
+      <div class="odds"><div class="obar"><i style="width:${p * 100}%"></i></div><b>${Math.round(p * 100)}%</b></div>
+      <div class="notes">${o.notes.join('｜') || '無加成'}</div>
+      <div class="skills">${skills.filter(s => s.role === 'atk').map(s => `<button data-skill="${s.name}" class="${state.chosen === s.name ? 'on' : ''}" ${state.cd[s.name] ? 'disabled' : ''}>
+        ✨ ${s.name}<small>勝率 +${Math.round(s.effect * 100)}%・${cdTxt(s)}</small></button>`).join('')}</div>
+      <div class="bbtns"><button id="attackBtn" class="primary" ${state.busy ? 'disabled' : ''}>⚔️ 出擊！</button><button id="cancelBtn">取消</button></div>`;
+  } else if (state.myTurn) {
+    html += `<p class="hint">👉 點地圖上<b style="color:var(--red)">閃爍</b>的敵方縣市選擇進攻目標（或先點自己的縣市當出兵點）。</p>`;
+  }
+  html += `<div class="defs">${skills.filter(s => s.role === 'def').map(s => `🛡️ ${s.name}：${cdTxt(s)}（被攻擊時自動發動）`).join('<br>')}</div>`;
+  if (!state.over) html += `<button id="endTurnBtn" ${state.myTurn && !state.busy ? '' : 'disabled'}>${state.myTurn ? '結束回合（不出擊）' : '等待中…'}</button>`;
+  box.innerHTML = html;
 }
 
 // ═══════════════ 自動播放 ═══════════════
@@ -712,14 +932,14 @@ function buildMap() {
   COUNTIES.forEach(c => {
     const p = el('path', { d: SHAPES.shapes[c.id].d, class: 'county' + (ISLETS.includes(c.id) ? ' islet' : ''), 'fill-rule': 'evenodd' }, land);
     el('title', {}, p).textContent = `${c.name}・${c.title}`;
-    p.addEventListener('click', () => showProfile(c.id));
+    p.addEventListener('click', () => onMapClick(c.id));
     paths[c.id] = p;
     const [x, y] = labelPos(c.id);
     el('text', { x, y: y + 2, class: 'lbl name' }, lbls).textContent = (STRATEGIC[c.id] ? '★' : '') + c.short;
     ownerLbls[c.id] = el('text', { x, y: y + 13, class: 'lbl owner' }, lbls);
   });
   el('g', { id: 'arrows' }, svg);
-  el('text', { x: 24, y: 785, class: 'insetTxt' }, svg).textContent = '★ = 戰略要地　虛線 = 海路（離島 ↔ 港口縣市）';
+  el('g', { id: 'pops' }, svg);
 }
 function flash(fromId, toId, A) {
   document.querySelectorAll('.county.atk, .county.def').forEach(h => h.classList.remove('atk', 'def'));
@@ -734,26 +954,52 @@ function flash(fromId, toId, A) {
   clearTimeout(flash.t);
   flash.t = setTimeout(() => { layer.innerHTML = ''; }, Math.max(500, delay() * 0.9));
 }
+function popText(id, text, color) {
+  if (autoTimer && delay() < 300) return;
+  const [x, y] = labelPos(id);
+  const t = el('text', { x, y: y - 12, class: 'pop', fill: color }, document.getElementById('pops'));
+  t.textContent = text;
+  setTimeout(() => t.remove(), 1200);
+}
+function toast(msg) {
+  const t = document.getElementById('toast');
+  t.textContent = msg;
+  t.classList.add('show');
+  clearTimeout(toast.t);
+  toast.t = setTimeout(() => t.classList.remove('show'), 1600);
+}
 
 // ═══════════════ 畫面更新 ═══════════════
 function render() {
+  const me = isBattle() ? state.player : null;
+  const targets = new Set();
+  if (me && state.myTurn && !state.busy) {
+    const froms = state.src ? [state.src] : territories(me);
+    for (const t of froms) for (const n of ADJ[t]) if (state.owner[n] !== me) targets.add(n);
+  }
   COUNTIES.forEach(c => {
     const f = state.owner[c.id];
-    paths[c.id].style.fill = byId[f].color;
+    const p = paths[c.id];
+    p.style.fill = byId[f].color;
     // 離島太小，用同色粗外框放大顯示
-    if (ISLETS.includes(c.id)) paths[c.id].style.stroke = byId[f].color;
-    paths[c.id].classList.toggle('picked', c.id === pickedId);
+    if (ISLETS.includes(c.id)) p.style.stroke = byId[f].color;
+    p.classList.toggle('picked', c.id === pickedId);
+    p.classList.toggle('mine', f === me);
+    p.classList.toggle('src', c.id === state.src);
+    p.classList.toggle('tgt', c.id === state.tgt);
+    p.classList.toggle('canhit', targets.has(c.id) && c.id !== state.tgt);
     ownerLbls[c.id].textContent = f === c.id ? '' : `屬${byId[f].short}`;
   });
   const list = alive().map(f => ({ f, ts: territories(f) })).sort((a, b) => b.ts.length - a.ts.length);
-  document.getElementById('board').innerHTML = list.map((x, i) => `<div class="row" data-id="${x.f}">
+  document.getElementById('board').innerHTML = list.map((x, i) => `<div class="row ${x.f === me ? 'me' : ''}" data-id="${x.f}">
     <span class="rk">${i + 1}</span><span class="sw" style="background:${byId[x.f].color}"></span>
-    <span class="nm">${byId[x.f].short}</span><span class="ts">${x.ts.map(id => byId[id].short).join('、')}</span>
+    <span class="nm">${byId[x.f].short}${x.f === me ? '★' : ''}</span><span class="ts">${x.ts.map(id => byId[id].short).join('、')}</span>
     <span class="ct">${x.ts.length} 塊</span></div>`).join('');
   document.getElementById('roundTxt').textContent = `第 ${state.round} 回合`;
-  document.getElementById('aliveTxt').textContent = `存活 ${list.length} / 22`;
+  document.getElementById('aliveTxt').textContent = `存活 ${list.length} / 22${isBattle() ? '・戰鬥模式' : '・觀戰模擬'}`;
   document.getElementById('boardTitle').textContent = `存活縣市排行榜（${list.length} / 22）`;
   showProfile(pickedId);
+  renderBattlePanel();
   updateButtons();
 }
 
@@ -789,15 +1035,35 @@ function log(html, cls = '') {
   while (box.children.length > 250) box.lastChild.remove();
 }
 
+// ═══════════════ 開始畫面 ═══════════════
+function showStart() {
+  stopAuto();
+  document.getElementById('banner').hidden = true;
+  document.getElementById('start').hidden = false;
+  document.getElementById('pickGrid').innerHTML = COUNTIES.map(c => `<button class="pickBtn" data-id="${c.id}">
+    <span class="sw" style="background:${c.color}"></span><b>${c.short}</b><small>${c.title}</small></button>`).join('');
+}
+
 // ═══════════════ 綁定 ═══════════════
 document.getElementById('stepBtn').addEventListener('click', step);
 document.getElementById('autoBtn').addEventListener('click', () => autoTimer ? stopAuto() : startAuto());
-document.getElementById('resetBtn').addEventListener('click', reset);
-document.getElementById('bannerReset').addEventListener('click', reset);
+document.getElementById('resetBtn').addEventListener('click', showStart);
+document.getElementById('bannerReset').addEventListener('click', showStart);
+document.getElementById('watchBtn').addEventListener('click', () => newGame('sim'));
+document.getElementById('pickGrid').addEventListener('click', e => { const b = e.target.closest('.pickBtn'); if (b) newGame('battle', b.dataset.id); });
 document.getElementById('board').addEventListener('click', e => { const r = e.target.closest('.row'); if (r) showProfile(r.dataset.id); });
+document.getElementById('battlePanel').addEventListener('click', e => {
+  const b = e.target.closest('button');
+  if (!b) return;
+  if (b.dataset.skill) { state.chosen = state.chosen === b.dataset.skill ? null : b.dataset.skill; render(); }
+  else if (b.id === 'attackBtn') playerAttack();
+  else if (b.id === 'cancelBtn') { state.tgt = state.chosen = null; render(); }
+  else if (b.id === 'endTurnBtn') endPlayerTurn();
+});
 
 buildMap();
-reset();
+newGame('sim');
+showStart();
 </script>
 </body>
 </html>
