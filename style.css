@@ -296,3 +296,37 @@ main { flex: 1; display: flex; min-height: 0; }
 .spItem b { display: block; }
 .spItem small { color: var(--muted); font-size: 12px; }
 .spItem.on { border-color: #c77dff; background: rgba(199, 125, 255, .15); }
+
+/* 縮放地圖、縣市卡片、小地圖 */
+#map { touch-action: none; cursor: grab; }
+#map.dragging { cursor: grabbing; }
+.cards { display: none; }
+#map.zoomed .cards { display: inline; }
+#map.zoomed .labels { display: none; }
+.ccard { cursor: pointer; }
+.ccard .ctag { stroke: #0b1426; stroke-width: .5; }
+.ccard .cname { text-anchor: middle; font-size: 4.6px; font-weight: 900; fill: #fff; paint-order: stroke; stroke: rgba(0, 0, 0, .55); stroke-width: .6px; pointer-events: none; }
+.ccard .cgrid { fill: #0e1a33; stroke: #e8eef9; stroke-width: .45; }
+.ccard .ccell { fill: rgba(255, 255, 255, .06); }
+.ccard .ccell.cls-inf { fill: rgba(76, 201, 240, .35); }
+.ccard .ccell.cls-moto { fill: rgba(255, 183, 3, .35); }
+.ccard .ccell.cls-gen { fill: rgba(239, 71, 111, .35); }
+.ccard .ccell.cls-art { fill: rgba(6, 214, 160, .35); }
+.ccard image, .ccard .cicon { pointer-events: none; }
+.ccard .cicon { text-anchor: middle; font-size: 3.6px; }
+.ccard .cskill { fill: #f4f1de; stroke: #0b1426; stroke-width: .45; }
+.ccard .cskillIcon { text-anchor: middle; font-size: 4.4px; pointer-events: none; }
+.ccard g.cooling { opacity: .4; }
+.ccard.mine .cgrid { stroke: var(--accent); stroke-width: .8; }
+.ccard.selected .cgrid { stroke: #fff; stroke-width: 1.1; }
+
+.minicard { padding: 10px; }
+.minihead { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; margin-bottom: 6px; }
+.minihead small { color: var(--muted); font-size: 11px; }
+.minirow { display: flex; gap: 8px; align-items: stretch; }
+#minimap { flex: 1; height: 220px; background: #12306b; border-radius: 8px; cursor: crosshair; touch-action: none; }
+#minimap .miniBox { fill: rgba(255, 255, 255, .12); stroke: #fff; stroke-width: 5; }
+.zoomCol { display: flex; flex-direction: column; align-items: center; gap: 4px; font-size: 13px; }
+#zoom { writing-mode: vertical-lr; direction: rtl; flex: 1; width: 22px; }
+#map .pop { font-size: calc(18px / var(--z, 1)); stroke-width: calc(4px / var(--z, 1)); }
+#map .arrow { stroke-width: calc(5px / var(--z, 1)); }
