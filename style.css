@@ -204,3 +204,7 @@ main { flex: 1; display: flex; min-height: 0; }
 #tip[hidden] { display: none; }
 #tip small { color: var(--muted); }
 #tip .odds { margin: 0; }
+
+.diffRow { display: flex; align-items: center; gap: 10px; margin-bottom: 14px; flex-wrap: wrap; }
+.diffRow > span { font-weight: 700; }
+.diffRow small { color: var(--muted); }
