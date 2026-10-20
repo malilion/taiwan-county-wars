@@ -12,7 +12,7 @@
   const count = a => a.inf + a.moto + a.gen + a.art;
   const fmtMoney = n => `${Math.floor(n)} 萬`;
 
-  const S = { gen: 0, speed: 1, paused: false, over: true, hover: null };
+  const S = { gen: 0, speed: 1, paused: false, over: true, hover: null, diffKey: 'easy' };
   const map = buildMap($('#map'), onCountyClick, id => { S.hover = id; if (!S.sel) renderInfo(); renderTip(); });
 
   // ───────── 狀態查詢 ─────────
@@ -56,10 +56,12 @@
   function newGame(mode, player) {
     S.gen++;
     initState(mode, player);
+    S.diff = DIFFICULTY[mode === 'play' ? S.diffKey : 'hard'];
     $('#log').innerHTML = '';
     log(mode === 'play'
-      ? `📣 ${fTag(player)} 宣布出征！目標：統一全台 22 縣市。`
+      ? `📣 ${fTag(player)} 宣布出征！目標：統一全台 22 縣市。（難度：${S.diff.name}）`
       : '📣 22 縣市大亂鬥開始！誰會是最後的贏家？', 'big');
+    if (S.diff.aiPeace) log(`🕊️ 前 ${S.diff.aiPeace} 天為和平期：AI 縣市不會主動開戰，趁機招兵、併吞鄰居吧！`, 'event');
     hideModal();
     render();
     runLoop(S.gen);
@@ -102,6 +104,7 @@
       S.turnIdx = 0;
       S.day++;
       log(`── 第 ${S.day} 天 ──`, 'day');
+      if (S.diff.aiPeace && S.day === S.diff.aiPeace + 1) log('⚠️ 和平期結束！各縣市開始對外擴張', 'big');
       if (Math.random() < 0.3) randomEvent();
       render();
       await wait(0.4, gen);
@@ -269,6 +272,9 @@
       for (const src of owned(f)) {
         if (S.acted.has(src) || count(S.army[src]) < 3) continue;
         for (const tgt of enemiesOf(src)) {
+          const vsPlayer = S.owner[tgt] === S.player;
+          if (S.day <= (vsPlayer ? S.diff.playerPeace : S.diff.aiPeace)) continue;
+          if (!vsPlayer && Math.random() > S.diff.aiVsAi) continue;
           const dp = power(S.army[tgt], defMult(S.owner[tgt], tgt));
           let ratio = dp ? power(S.army[src], atkMult(f, src)) / dp : 99;
           if (owned(S.owner[tgt]).length === 1) ratio *= 1.1; // 喜歡收割
@@ -277,7 +283,7 @@
       }
       if (!best) break;
       // 越後期越敢打，避免僵局
-      const need = S.aggr[f] * Math.max(0.7, 1 - Math.max(0, S.day - 25) / 80);
+      const need = S.aggr[f] * S.diff.aggr * Math.max(0.7, 1 - Math.max(0, S.day - 25) / 80);
       if (best.ratio < need && !(best.ratio > 0.95 && Math.random() < 0.12)) break;
       await doAttack(best.src, best.tgt, gen);
     }
@@ -506,6 +512,9 @@
     $('#modal').hidden = false;
     $('#startView').hidden = false;
     $('#endView').hidden = true;
+    $('#diffPick').innerHTML = Object.entries(DIFFICULTY).map(([k, d]) =>
+      `<button data-d="${k}" class="${k === S.diffKey ? 'on' : ''}">${d.name}</button>`).join('');
+    $('#diffDesc').textContent = DIFFICULTY[S.diffKey].desc;
     $('#pickGrid').innerHTML = REGIONS.map(r => `<div class="preg"><h4>${r.name}</h4>${r.ids.map(id => {
       const c = byId[id];
       return `<button class="pickBtn" data-id="${id}"><span class="sw" style="background:${c.color}"></span>${c.short}<small>${c.nick}</small></button>`;
@@ -524,6 +533,13 @@
 
   // ───────── 事件綁定 ─────────
   $('#pickGrid').addEventListener('click', e => { const b = e.target.closest('.pickBtn'); if (b) newGame('play', b.dataset.id); });
+  $('#diffPick').addEventListener('click', e => {
+    const b = e.target.closest('button[data-d]');
+    if (!b) return;
+    S.diffKey = b.dataset.d;
+    document.querySelectorAll('#diffPick button').forEach(x => x.classList.toggle('on', x === b));
+    $('#diffDesc').textContent = DIFFICULTY[S.diffKey].desc;
+  });
   $('#watchAll').addEventListener('click', () => newGame('watch'));
   $('#newBtn').addEventListener('click', showStart);
   $('#againBtn').addEventListener('click', showStart);

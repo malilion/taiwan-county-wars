@@ -81,3 +81,10 @@ const RESEARCH = {
   def: { name: '城防工事', icon: '🛡️', desc: '全縣防禦 +12%' },
   eco: { name: '經濟發展', icon: '💰', desc: '每日稅收 +15%' },
 };
+
+// 難度：playerPeace / aiPeace = 前幾天 AI 不會攻擊玩家 / 不會互打；aiVsAi = AI 互打的機率；aggr = 進攻門檻倍率
+const DIFFICULTY = {
+  easy: { name: '簡單', desc: '前 12 天和平發展，AI 很少互打，適合慢慢併吞', playerPeace: 12, aiPeace: 12, aiVsAi: 0.25, aggr: 1.4 },
+  normal: { name: '普通', desc: '前 6 天和平，之後各縣市開始蠢蠢欲動', playerPeace: 6, aiPeace: 6, aiVsAi: 0.6, aggr: 1.15 },
+  hard: { name: '困難', desc: '第一天就開打的大亂鬥', playerPeace: 0, aiPeace: 0, aiVsAi: 1, aggr: 1 },
+};
