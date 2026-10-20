@@ -330,3 +330,7 @@ main { flex: 1; display: flex; min-height: 0; }
 #zoom { writing-mode: vertical-lr; direction: rtl; flex: 1; width: 22px; }
 #map .pop { font-size: calc(18px / var(--z, 1)); stroke-width: calc(4px / var(--z, 1)); }
 #map .arrow { stroke-width: calc(5px / var(--z, 1)); }
+#toast.good { background: var(--green); color: #0b1426; }
+.recruitHead { display: flex; justify-content: space-between; align-items: baseline; margin-top: 12px; font-size: 14px; }
+.recruitHead span { color: var(--muted); font-size: 13px; }
+.recruitHead span b { color: var(--accent); font-size: 16px; }
