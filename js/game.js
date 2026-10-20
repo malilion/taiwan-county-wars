@@ -114,6 +114,8 @@
         if (f === S.player && S.mode === 'play') {
           S.acted = new Set();
           log(`🌅 第 ${S.day} 天，輪到你了！稅收 +${fmtMoney(inc)}`, 'me');
+          // 自動選取老家（或任一己方縣市），招兵按鈕一開始就看得到
+          if (!S.sel || S.owner[S.sel] !== S.player) S.sel = S.owner[S.player] === S.player ? S.player : owned(S.player)[0];
           render();
           return; // 等玩家按「結束回合」
         }
@@ -400,7 +402,8 @@
   }
 
   // ───────── 地域技能 ─────────
-  // 技能欄：玩家的縣市可以自訂（S.slots[id] = [技能 key 或 null…]）；AI 的縣市只有自己的技能
+  // 技能欄：第 0 欄固定是縣市固有技能（不能換）；玩家的老家和每個佔領的縣市多 1 個自訂欄（S.slots[id][1]）
+  // AI 的縣市只有固有技能
   // 技能 key = 技能原本所屬的縣市 id（REGION_SKILLS 的 key）；冷卻以「縣市:欄位」計算，換技能也不會重置冷卻
   const slotsOf = id => S.owner[id] === S.player && S.slots[id] ? S.slots[id] : [id];
   const cdKey = (id, i) => `${id}:${i}`;
@@ -411,7 +414,7 @@
     if (S.owner[id] !== S.player) { delete S.slots[id]; return; }
     if (!S.library.has(id)) log(`📜 解鎖地域技能「${REGION_SKILLS[id].icon} ${REGION_SKILLS[id].name}」，可以裝到任何己方縣市的技能欄`, 'me');
     S.library.add(id);
-    S.slots[id] = id === S.player ? [id, null] : [id];
+    S.slots[id] = [id, null];
   }
   // 和平期內不能對受保護的對象使用攻擊型技能
   function hostileTargets(id) {
@@ -464,7 +467,7 @@
     S.picker = { id, i };
     const cur = S.slots[id][i];
     const used = S.slots[id].filter((k, j) => k && j !== i);
-    $('#spTitle').innerHTML = `📜 設定 ${cTag(id)} 的${i === 0 ? '' : '額外'}技能欄`;
+    $('#spTitle').innerHTML = `📜 設定 ${cTag(id)} 的自訂技能欄`;
     $('#spList').innerHTML = [...S.library].map(k => {
       const sk = ALL_SKILLS[k];
       const dup = used.includes(k);
@@ -596,6 +599,7 @@
     if (S.money[S.player] < cost) return flash('錢不夠！');
     S.money[S.player] -= cost;
     addUnits(S.army[id], k, 1);
+    flash(`${U(k).name} +1　💰 -${cost} 萬（剩 ${fmtMoney(S.money[S.player])}）`, 'good');
     render();
   }
   function doResearch(k) {
@@ -695,9 +699,10 @@
     const burst = svgEl('polygon', { points, class: `battle-burst ${outcome}` }, map.fx);
     setTimeout(() => burst.remove(), 700);
   }
-  function flash(msg) {
+  function flash(msg, kind = '') {
     const el = $('#toast');
     el.textContent = msg;
+    el.classList.toggle('good', kind === 'good');
     el.classList.add('show');
     clearTimeout(flash.t);
     flash.t = setTimeout(() => el.classList.remove('show'), 1400);
@@ -793,17 +798,18 @@
     ].filter(Boolean);
     const canEdit = isMineSel && S.slots[id];
     html += slotsOf(id).map((key, i) => {
-      const label = i === 0 ? (canEdit && key !== id ? '技能欄' : '地域技能') : '額外技能欄';
+      const label = i === 0 ? '固有技能' : '自訂技能欄';
       if (!key) return `<div class="rskill empty"><span class="ricon">➕</span><div class="rtext"><b>${label}（空）</b><small>${canEdit ? '從技能庫挑一個技能裝上' : '尚未設定'}</small></div>
         ${canEdit ? `<button data-pick="${i}">設定</button>` : ''}</div>`;
       const sk = ALL_SKILLS[key], block = skillBlock(id, i);
       return `<div class="rskill"><span class="ricon">${sk.icon}</span><div class="rtext"><b>${label}：${sk.name}${key !== id ? `<em>（${byId[key] ? `來自${byId[key].short}` : '通用'}）</em>` : ''}</b><small>${sk.desc}（冷卻 ${sk.cd} 天）</small></div>
         <div class="rbtns">${isMineSel ? `<button data-skill="${i}" ${block ? 'disabled' : ''}>${block || '發動'}</button>` : skillWait(id, i) ? `<span class="cdTag">冷卻 ${skillWait(id, i)} 天</span>` : ''}
-        ${canEdit ? `<button class="swap" data-pick="${i}">更換</button>` : ''}</div></div>`;
+        ${canEdit && i > 0 ? `<button class="swap" data-pick="${i}">更換</button>` : ''}</div></div>`;
     }).join('') + (status.length ? `<div class="rstatus">${status.join('　')}</div>` : '');
     if (isMineSel) {
       const acted = S.acted.has(id);
-      html += `<div class="recruit">${unitsOf(f).map(k => `<button data-u="${k}" class="${U(k).owner ? 'custom' : ''}" ${S.money[f] < unitCost(k, id) || !room(id) ? 'disabled' : ''} title="${U(k).desc}">
+      html += `<div class="recruitHead"><b>🪖 招兵到${c.short}</b><span>💰 目前 <b>${fmtMoney(S.money[f])}</b></span></div>
+        <div class="recruit">${unitsOf(f).map(k => `<button data-u="${k}" class="${U(k).owner ? 'custom' : ''}" ${S.money[f] < unitCost(k, id) || !room(id) ? 'disabled' : ''} title="${U(k).desc}">
         ${unitIcon(k)} ${U(k).name}<br><small>${unitCost(k, id)} 萬・攻${U(k).atk}/血${U(k).hp}・${UNIT_CLASSES[U(k).cls]}</small></button>`).join('')}</div>
         <button id="trBtn" class="trBtn ${S.transferMode ? 'on' : ''}" ${reachable(id).size ? '' : 'disabled'}>🚚 ${S.transferMode ? '點地圖上綠框的己方縣市（再按一次取消）' : reachable(id).size ? '調兵到其他己方縣市' : '調兵（還沒有其他相連的己方縣市）'}</button>
         <label class="half"><input type="checkbox" id="halfChk" ${S.sendHalf ? 'checked' : ''}> 進攻時只派一半兵力（其餘留守）</label>
@@ -927,7 +933,7 @@
     const sb = e.target.closest('button[data-skill]');
     if (sb && playerActive() && S.owner[S.sel] === S.player) { useSkill(S.sel, +sb.dataset.skill); render(); }
     const pb = e.target.closest('button[data-pick]');
-    if (pb && playerActive() && S.slots[S.sel]) openSkillPicker(S.sel, +pb.dataset.pick);
+    if (pb && playerActive() && S.slots[S.sel] && +pb.dataset.pick > 0) openSkillPicker(S.sel, +pb.dataset.pick);
   });
   $('#info').addEventListener('change', e => { if (e.target.id === 'halfChk') { S.sendHalf = e.target.checked; renderInfo(); } });
   $('#research').addEventListener('click', e => { const b = e.target.closest('button[data-k]'); if (b) doResearch(b.dataset.k); });
