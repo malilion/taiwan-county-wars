@@ -203,6 +203,7 @@
       <li>戰鬥模式是<b>一塊一塊</b>爭奪領土；觀戰模擬則是勝者吞併敗者整個勢力。</li>
       <li>被攻擊時，冷卻好的防守必殺技會自動發動；守自己的老家有主場優勢。前 3 回合是和平期，其他縣市不會打你。</li>
       <li>每 5 塊領土每回合多一次出擊；但你越大，其他縣市越會聯手圍剿你。</li>
+      <li>每 10 回合是大選日：被佔領的縣市有機會罷免成功、恢復獨立。</li>
       <li>打下全部 22 縣市，或集齊六都守住 5 回合就獲勝；領土全部被打下就輸了。</li>
     </ul>
   </div>
@@ -548,6 +549,19 @@ const EVENTS = [
   { when: A => owns(A, 'newtaipei'), text: '🌀 攻方在新北高架橋迷宮迷路，繞回原點。', effect: -0.15 },
   { when: (A, D) => owns(D, 'penghu'), text: '🧱 澎湖消波塊又多了一排，登陸難度上升。', effect: -0.12 },
   { when: A => owns(A, 'hualien'), text: '🪨 蘇花公路落石，攻勢受阻。', effect: -0.15 },
+  // 政治時事梗（不點名特定人物或政黨）
+  { when: () => true, text: '📢 選舉宣傳車開進戰場，「拜託拜託、懇請支持」重複播放，雙方被洗腦到忘記打仗。', effect: 'cancel' },
+  { when: () => true, text: '🤝 候選人跑來掃街拜票，攻方停下來握手合照，攻勢 -10%。', effect: -0.1 },
+  { when: () => true, text: '🧧 普發現金入帳！攻方士氣大振 +12%。', effect: 0.12 },
+  { when: () => true, text: '🪑 議會又吵到拉椅子，守方指揮官被叫去質詢，攻方趁虛而入 +12%。', effect: 0.12 },
+  { when: () => true, text: '📺 政論節目名嘴預測攻方必勝……反指標發動，攻方 -12%。', effect: -0.12 },
+  { when: () => true, text: '🧾 政見支票跳票，攻方補給沒送到 -10%。', effect: -0.1 },
+  { when: () => true, text: '✂️ 守方縣長忙著剪綵開箱新蚊子館，前線沒人指揮，攻方 +12%。', effect: 0.12 },
+  { when: () => true, text: '📊 民調顯示攻方大幅領先，部隊過度自信開始放鬆，-8%。', effect: -0.08 },
+  { when: () => true, text: '🎤 今晚是選前之夜，雙方都跑去造勢晚會喊凍蒜，今天不打仗。', effect: 'cancel' },
+  { when: () => true, text: '🗳️ 公投綁大選，守方全員回戶籍地投票，空城被攻方撿到便宜 +15%。', effect: 0.15 },
+  { when: () => true, text: '🏗️ 攻方要走的那座橋，預算編了三屆還沒蓋好，行動取消。', effect: 'cancel' },
+  { when: () => true, text: '🚩 競選旗海插滿戰場，攻方部隊看不到路 -10%。', effect: -0.1 },
 ];
 
 // ═══════════════ 旁白（台灣迷因詞庫） ═══════════════
@@ -562,6 +576,11 @@ const WIN_QUIPS = [
   '{A} 軍入城第一件事：把 {D} 的海岸線再補一排消波塊。',
   '{D} 的山豬宣布中立，表示誰贏都一樣要吃地瓜。',
   '{A} 承諾改善行人地獄，{D} 居民表示先看看再說。',
+  '{A} 宣布：明年起 {D} 路口的競選看板全部換成 {A} 的臉。',
+  '{D} 議會連夜召開臨時會，結論是下週再開一次會。',
+  '{A} 承諾在 {D} 蓋捷運，預計下下屆任期內動工。',
+  '名嘴分析：{D} 會輸主要是風水問題，下集再告訴你。',
+  '{A} 開記者會：「這是人民的勝利！」背板字體大到後排看得到。',
 ];
 const LOSE_QUIPS = [
   '{A} 軍摸摸鼻子回家，順便買了伴手禮。',
@@ -570,6 +589,10 @@ const LOSE_QUIPS = [
   '{D} 居民放鞭炮慶祝，被開罰噪音。',
   '{A} 部隊在路口等待轉等太久，錯過最佳進攻時機。',
   '{D} 守軍請 {A} 喝全糖珍奶，對方喝完就睡著了。',
+  '{A} 發言人：「這是戰略性撤退，我們會虛心檢討，下次選舉見。」',
+  '{D} 守軍凍蒜！宣傳車繞城一圈放鞭炮。',
+  '{A} 宣布成立專案小組研究失敗原因，小組下設三個委員會。',
+  '{D} 民代第一時間到前線拍照打卡，標題：「我守住了」。',
 ];
 
 // ═══════════════ 狀態 ═══════════════
@@ -646,7 +669,9 @@ const clampP = p => Math.min(0.9, Math.max(0.1, p));
 function step() {
   if (state.over) return;
   state.round++;
+  electionDay();
   const A = pickAttacker();
+  if (!A) return render();
   battle(A);
   // 晶片科技霸權：再行動一次
   if (!state.over && owns(A, 'hsinchucity') && alive().includes(A)) {
@@ -655,6 +680,25 @@ function step() {
   }
   if (!state.over) checkSixCities();
   render();
+}
+
+// 大選日：每 ELECTION_EVERY 回合舉行一次，被佔領的縣市有機會罷免成功、恢復獨立
+const ELECTION_EVERY = 10;
+function electionDay() {
+  if (state.round % ELECTION_EVERY !== 0) return;
+  const occupied = COUNTIES.map(c => c.id).filter(id => state.owner[id] !== id);
+  log(`<span class="r">R${state.round}</span>🗳️ 大選日到了！全台投票所開門，各地宣傳車同時出動。`, 'event');
+  if (!occupied.length) return;
+  const id = pick(occupied);
+  const ruler = state.owner[id];
+  if (Math.random() < 0.4) {
+    state.owner[id] = id;
+    log(`🗳️ ${byId[id].short} 罷免案通過門檻！宣布脫離 ${fTag(ruler)}，恢復獨立。地方阿伯：「我就說要出來投票。」`, 'big');
+    popText(id, '罷免成功！', '#ffd166');
+    if (isBattle() && !territories(state.player).length) finish(id, `第 ${state.round} 回合大選日，你最後一塊領土 ${byId[id].short} 罷免成功獨立了。`);
+  } else {
+    log(`🗳️ ${byId[id].short} 想罷免 ${fTag(ruler)}，但投票率太低沒過門檻。據說大家都跑去連假出遊了。`, 'event');
+  }
 }
 
 // 六都制霸：同一勢力集齊六都並守住 SIX_HOLD 回合
@@ -784,6 +828,8 @@ function finish(w, text) {
 function startPlayerTurn() {
   if (state.over) return;
   state.round++;
+  electionDay();
+  if (state.over) return;
   for (const k in state.cd) if (state.cd[k] > 0) state.cd[k]--;
   // 每 5 塊領土多一次出擊；晶片科技霸權（佔領新竹市）再 +1
   state.attacksLeft = 1 + Math.floor(territories(state.player).length / 5) + (owns(state.player, 'hsinchucity') ? 1 : 0);
