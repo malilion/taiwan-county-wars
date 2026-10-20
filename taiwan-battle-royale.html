@@ -966,7 +966,7 @@ function buildMap() {
   svg.setAttribute('viewBox', '0 0 600 800');
   for (const [id, b] of Object.entries(SHAPES.insets)) {
     el('rect', { x: b.x - 10, y: b.y - 20, width: b.w + 20, height: b.h + 30, rx: 8, class: 'inset' }, svg);
-    el('text', { x: b.x - 4, y: b.y - 7, class: 'insetTxt' }, svg).textContent = `${byId[id].name}（示意位置）`;
+    el('text', { x: b.x - 4, y: b.y - 7, class: 'insetTxt' }, svg).textContent = byId[id].name;
   }
   const sea = el('g', {}, svg);
   for (const [a, list] of Object.entries(SEA_ADJ)) for (const b of list) {
