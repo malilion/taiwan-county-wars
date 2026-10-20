@@ -31,6 +31,7 @@
         <div class="mehead"><span id="meName"></span><span id="meCounties"></span></div>
         <div class="money"><span>💰 <b id="meMoney"></b></span><span id="meIncome"></span></div>
         <div id="research"></div>
+        <button id="designBtn" class="designBtn">🛠️ 組建兵種 <small id="designCount"></small></button>
         <button id="endTurn" class="primary">結束回合 ▶</button>
       </div>
       <div id="info" class="card"></div>
@@ -63,6 +64,7 @@
             <li>每天輪到你時會收到稅收（萬元），控制整個地區（北、中、南、東、離島）有額外加成。</li>
             <li>點選自己的縣市可以<b>招兵</b>；每個縣市每天可以<b>出兵一次</b>：點相鄰敵方縣市進攻，或點相鄰己方縣市調兵。</li>
             <li>兵種相剋：🛵 機車 剋 💣 砲兵 剋 👺 八家將 剋 🪖 阿兵哥 剋 🛵 機車。</li>
+            <li>按「🛠️ 組建兵種」可以自己搭配武器＋防具＋坐騎，打造專屬部隊（最多 4 種）。</li>
             <li>每個縣市有特性（例如苗栗國防禦 +25%）；研發可以永久提升攻擊、防禦或稅收。</li>
             <li>簡單／普通難度開局有和平期，AI 不會主動開戰，可以先專心併吞鄰近縣市。</li>
             <li>離島靠海上航線連接（虛線）。消滅所有其他縣市即可統一全台！</li>
@@ -75,6 +77,22 @@
         <button id="againBtn" class="primary wide">再來一局</button>
         <button id="watchBtn" class="wide">繼續觀戰</button>
       </div>
+    </div>
+  </div>
+
+  <div id="designer" class="overlay" hidden>
+    <div class="dialog designDialog">
+      <h2>🛠️ 組建兵種</h2>
+      <p class="tag">自由搭配武器、防具、坐騎，打造你的專屬部隊（組建費 <b id="dzFee"></b>）</p>
+      <div id="dzParts"></div>
+      <div class="dzRow"><span class="dzLabel">圖示</span><div id="dzIcons" class="chips"></div></div>
+      <div class="dzRow"><span class="dzLabel">名稱</span><input id="dzName" maxlength="8" placeholder="幫部隊取個名字"></div>
+      <div id="dzPreview"></div>
+      <div class="dzBtns">
+        <button id="dzCancel">取消</button>
+        <button id="dzOk" class="primary">組建</button>
+      </div>
+      <div id="dzMine"></div>
     </div>
   </div>
 
