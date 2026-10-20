@@ -62,7 +62,8 @@
           <summary>遊戲規則</summary>
           <ul>
             <li>每天輪到你時會收到稅收（萬元），控制整個地區（北、中、南、東、離島）有額外加成。</li>
-            <li>點選自己的縣市可以<b>招兵</b>；每個縣市每天可以<b>出兵一次</b>：點相鄰敵方縣市進攻，或點相鄰己方縣市調兵。</li>
+            <li>點選自己的縣市可以<b>招兵</b>（每個縣市最多 25 人）；每個縣市每天可以<b>出兵一次</b>，點相鄰敵方縣市進攻。</li>
+            <li>按「🚚 調兵」可以把部隊分配到任何<b>相連的己方縣市</b>，自選兵種與人數，不限次數。</li>
             <li>兵種相剋：🛵 機車 剋 💣 砲兵 剋 👺 八家將 剋 🪖 阿兵哥 剋 🛵 機車。</li>
             <li>按「🛠️ 組建兵種」可以自己搭配武器＋防具＋坐騎，打造專屬部隊（最多 4 種）。</li>
             <li>每個縣市有特性（例如苗栗國防禦 +25%）；研發可以永久提升攻擊、防禦或稅收。</li>
@@ -76,6 +77,20 @@
         <p id="endText"></p>
         <button id="againBtn" class="primary wide">再來一局</button>
         <button id="watchBtn" class="wide">繼續觀戰</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="transfer" class="overlay" hidden>
+    <div class="dialog trDialog">
+      <h2 id="trTitle"></h2>
+      <p class="tag">選擇要調動的兵種與人數（每個縣市最多 25 人）</p>
+      <div id="trRows"></div>
+      <p id="trInfo"></p>
+      <div class="dzBtns">
+        <button id="trSwap">⇄ 反方向</button>
+        <button id="trCancel">取消</button>
+        <button id="trOk" class="primary">確認調動</button>
       </div>
     </div>
   </div>
