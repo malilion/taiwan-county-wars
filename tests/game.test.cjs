@@ -1289,3 +1289,108 @@ test('end-turn confirmation reverts without ending, and a direct end still works
   h.endPlayerTurn();
   assert.notEqual(h.S.current, 'taipei');
 });
+
+test('mute shortcut stays quiet without Sfx and ignores text fields', () => {
+  const f = fixture();
+  const press = (key, target) => f.listeners.keydown.at(-1)({ key, repeat: false, preventDefault() {}, target: target || { tagName: 'DIV' } });
+  assert.equal(f.get('#sfxBtn').textContent, '🔇');
+  assert.equal(f.get('#sfxBtn').title, '音效：關');
+  assert.doesNotThrow(() => press('m'));
+  assert.doesNotThrow(() => press('M', { tagName: 'INPUT' }));
+  assert.doesNotThrow(() => press('m', { tagName: 'SELECT' }));
+  f.get('#sfxBtn').handlers.click();
+  assert.equal(f.get('#sfxBtn').textContent, '🔇');
+});
+
+test('synthesized sfx stays silent without AudioContext, defaults to muted, and persists the toggle', () => {
+  const html = fs.readFileSync('index.html', 'utf8');
+  const readme = fs.readFileSync('README.md', 'utf8');
+  assert.ok(html.indexOf('js/sfx.js?v=20261023c') !== -1 && html.indexOf('js/sfx.js?v=20261023c') < html.indexOf('js/game.js'), 'sfx.js loads before game.js');
+  assert.match(html, /id="sfxBtn"[^>]*aria-label="音效：關"/);
+  assert.match(html, /id="sfxBtn"[^>]*title="音效：關"/);
+  assert.match(readme, /🔇／🔊/);
+  assert.match(readme, /預設靜音/);
+
+  function load(extra, storage = new Map()) {
+    const context = vm.createContext({
+      localStorage: {
+        getItem: k => storage.has(k) ? storage.get(k) : null,
+        setItem(k, v) { if (storage.get('deny')) throw Error('denied'); storage.set(k, String(v)); },
+      },
+      ...extra,
+    });
+    vm.runInContext(fs.readFileSync('js/sfx.js', 'utf8'), context);
+    return context.Sfx;
+  }
+
+  const storage = new Map();
+  const Sfx = load({}, storage);
+  assert.equal(typeof Sfx.play, 'function');
+  assert.equal(Sfx.muted(), true);
+  assert.doesNotThrow(() => Sfx.play('attack'));
+  assert.doesNotThrow(() => Sfx.play('not-a-sound'));
+  assert.equal(storage.has('tcw-muted'), false, 'reading the default does not write storage');
+  Sfx.toggle();
+  assert.equal(Sfx.muted(), false);
+  assert.equal(storage.get('tcw-muted'), '0');
+  assert.doesNotThrow(() => {
+    for (const name of ['click', 'attack', 'hit', 'capture', 'hold', 'news', 'tactic', 'end']) Sfx.play(name);
+  });
+  Sfx.setMuted(true);
+  assert.equal(Sfx.muted(), true);
+  assert.equal(storage.get('tcw-muted'), '1');
+  Sfx.toggle();
+  assert.equal(Sfx.muted(), false);
+  storage.set('deny', '1');
+  assert.doesNotThrow(() => Sfx.toggle());
+  assert.equal(Sfx.muted(), true, 'mute still flips when storage throws');
+
+  const storedOn = new Map([['tcw-muted', '0']]);
+  let constructed = 0;
+  const unmuted = load({ AudioContext: class { constructor() { constructed++; throw Error('blocked'); } } }, storedOn);
+  assert.equal(unmuted.muted(), false);
+  assert.doesNotThrow(() => unmuted.play('click'));
+  assert.equal(constructed, 1);
+
+  const clock = { t: 1000 };
+  let osc = 0, master = null, contexts = 0;
+  class FakeAudio {
+    constructor() {
+      contexts++;
+      this.sampleRate = 8000;
+      this.currentTime = 0;
+      this.state = 'running';
+      this.destination = {};
+    }
+    createGain() {
+      const gain = { value: 1, setValueAtTime() {}, exponentialRampToValueAtTime() {} };
+      const node = { gain, connect() {} };
+      if (!this.master) { this.master = node; master = node; }
+      return node;
+    }
+    createOscillator() {
+      osc++;
+      return { type: '', frequency: { setValueAtTime() {}, exponentialRampToValueAtTime() {} }, connect() {}, start() {}, stop() {} };
+    }
+    createBuffer(_ch, len) { return { getChannelData: () => new Float32Array(len) }; }
+    createBufferSource() { return { connect() {}, start() {}, stop() {} }; }
+    createBiquadFilter() { return { type: '', frequency: { setValueAtTime() {} }, connect() {} }; }
+  }
+  const live = load({ AudioContext: FakeAudio, performance: { now: () => clock.t } }, new Map([['tcw-muted', '0']]));
+  assert.equal(live.muted(), false);
+  live.play('attack');
+  assert.equal(contexts, 1);
+  assert.equal(master.gain.value, 0.25);
+  const first = osc;
+  assert.ok(first >= 1);
+  live.play('attack');
+  assert.equal(osc, first, 'same sound inside 60 ms is ignored');
+  clock.t += 60;
+  live.play('attack');
+  assert.ok(osc > first);
+  live.setMuted(true);
+  const gated = osc;
+  live.play('click');
+  assert.equal(osc, gated, 'muted play stays silent');
+  assert.equal(live.muted(), true);
+});
