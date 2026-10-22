@@ -437,6 +437,7 @@ button:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
 .battleScreen {
   /* 戰鬥畫面配色：沿用遊戲的深藍面板與金色重點，戰場用柔和沙地色讓角色清楚 */
   --bs-band: #0f1b33; --bs-edge: #2a3f66;
+  --uh: clamp(18px, 3.4vw, 34px); /* 每個角色一樣高 */
   --bs-ground: #cdb88a; --bs-ground-edge: #a8925f; --bs-pebble: rgba(92, 70, 35, .35); --bs-ink: #4a3a1c;
   position: fixed; inset: 0; z-index: 9; background: rgba(5, 10, 20, .82);
   display: flex; align-items: center; justify-content: center; padding: 16px;
@@ -491,11 +492,11 @@ button:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
 .bsColHead { font-size: 11px; font-weight: 700; color: var(--bs-ink); white-space: nowrap; display: flex; flex-direction: column; align-items: center; gap: 2px; min-height: 30px; }
 .bsColUnits { display: flex; flex-direction: column; align-items: center; gap: 2px; flex: 1; justify-content: center; }
 .bsUnit {
-  position: relative; flex: none; width: clamp(16px, 3.2vw, 32px); height: clamp(16px, 3.2vw, 32px);
-  display: grid; place-items: center; font-size: clamp(12px, 2.6vw, 24px);
+  position: relative; flex: none; height: var(--uh); min-width: var(--uh);
+  display: grid; place-items: center; font-size: calc(var(--uh) * .82); line-height: 1;
 }
 .bsUnit::after { content: ''; position: absolute; bottom: -2px; left: 15%; right: 15%; height: 4px; border-radius: 50%; background: rgba(0, 0, 0, .28); z-index: -1; }
-.bsSprite { width: 100%; height: 100%; object-fit: contain; }
+.bsSprite { display: block; height: var(--uh); width: auto; max-width: calc(var(--uh) * 1.9); object-fit: contain; }
 .bsCount { flex: none; font-size: 11px; line-height: 1.2; text-align: center; font-weight: 700; color: #fff; background: rgba(19, 33, 59, .78); border-radius: 6px; padding: 1px 5px; white-space: nowrap; }
 .bsDmg {
   position: absolute; top: 26px; left: 50%; margin-left: -1em; font-style: normal; font-weight: 900; font-size: clamp(16px, 3vw, 24px);
@@ -505,7 +506,7 @@ button:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
 .clash .right .bsUnit { animation: bs-lunge-l .5s ease-in-out var(--d) both; }
 .clash .bsUnit.hit .bsFace { animation: bs-hit .45s steps(2) calc(var(--d) + .25s) 2; }
 /* 面對面：右方（或面向左的圖在左方）水平翻轉 */
-.bsFace { display: grid; place-items: center; width: 100%; height: 100%; }
+.bsFace { display: grid; place-items: center; height: 100%; }
 .bsCols.right .bsFace:not(.faceL), .bsCols.left .bsFace.faceL { transform: scaleX(-1); }
 .clash .left .bsUnit.dying { animation: bs-lunge-r .5s ease-in-out var(--d), bs-die .5s ease-in calc(var(--d) + .55s) forwards; }
 .clash .right .bsUnit.dying { animation: bs-lunge-l .5s ease-in-out var(--d), bs-die .5s ease-in calc(var(--d) + .55s) forwards; }
