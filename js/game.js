@@ -16,7 +16,54 @@
   // 每個縣市最多 MAX_TROOPS 名戰鬥人員
   const MAX_TROOPS = 25;
   const room = id => Math.max(0, MAX_TROOPS - count(S.army[id]));
-  const addCapped = (id, k, n) => { const m = Math.min(n, room(id)); addUnits(S.army[id], k, m); return m; };
+  const addCapped = (id, k, n) => { clampMoved(id); const m = Math.min(n, room(id)); addUnits(S.army[id], k, m); return m; };
+  // 今天已行動的部隊（調入或出征過）。同一兵種在格子裡，前面是還沒行動的。
+  function clampMoved(id) {
+    const moved = S.moved?.[id];
+    if (!moved) return;
+    const army = S.army[id] || {};
+    for (const k of Object.keys(moved)) {
+      const n = Math.min(moved[k] || 0, army[k] || 0);
+      if (n > 0) moved[k] = n; else delete moved[k];
+    }
+    if (!Object.keys(moved).length) delete S.moved[id];
+  }
+  function freshArmy(id) {
+    clampMoved(id);
+    const moved = S.moved[id] || {}, out = {};
+    for (const k of kinds(S.army[id] || {})) {
+      const n = S.army[id][k] - (moved[k] || 0);
+      if (n > 0) out[k] = n;
+    }
+    return out;
+  }
+  function markMoved(id, bag) {
+    if (!count(bag)) return;
+    if (!S.moved[id]) S.moved[id] = {};
+    for (const k of kinds(bag)) S.moved[id][k] = (S.moved[id][k] || 0) + bag[k];
+    clampMoved(id);
+  }
+  function resetTurnActions() { S.acted = new Set(); S.moved = {}; }
+  function trimTo(max, bag) {
+    const out = {};
+    for (const k of kinds(bag)) out[k] = bag[k];
+    let n = count(out);
+    while (n > max) {
+      const k = kinds(out).sort((a, b) => U(a).cost - U(b).cost || a.localeCompare(b))[0];
+      if (--out[k] <= 0) delete out[k];
+      n--;
+    }
+    return out;
+  }
+  // 可調出的新鮮部隊，且來源至少留 1 人
+  function transferable(from, requested) {
+    const fresh = freshArmy(from), bag = {};
+    for (const k of Object.keys(requested || {})) {
+      const n = Number.isInteger(requested[k]) ? Math.min(requested[k], fresh[k] || 0) : 0;
+      if (n > 0) bag[k] = n;
+    }
+    return trimTo(Math.max(0, count(S.army[from]) - 1), bag);
+  }
   const U = k => S.units[k];
   const iconMarkup = (icon, cls = 'unit-sprite') => typeof icon === 'string' && icon.startsWith('assets/')
     ? `<img class="${cls}" src="${icon}" alt="">` : icon;
@@ -63,7 +110,7 @@
   function initState(mode, player) {
     Object.assign(S, {
       mode, player: player || null, over: false, day: 1, turnIdx: 0, current: null, sel: null, busy: false, invasion: null, expeditionPort: null, lastExpedition: null,
-      sendHalf: false, acted: new Set(), owner: {}, army: {}, money: {}, research: {}, aggr: {}, paused: false,
+      sendHalf: false, acted: new Set(), moved: {}, owner: {}, army: {}, money: {}, research: {}, aggr: {}, paused: false,
       units: Object.fromEntries(Object.entries({ ...UNITS, ...Invasion.UNITS }).map(([k, u]) => [k, { ...u, owner: null }])), unitSeq: 0,
       posture: Object.fromEntries(COUNTIES.map(c => [c.id, 'balanced'])), buildings: Object.fromEntries(COUNTIES.map(c => [c.id, null])), skillReady: {}, buff: {}, stun: {}, menuOpen: false, transferMode: false, attack: null, lastBattle: null, aim: null, news: [],
     });
@@ -124,14 +171,14 @@
         // 替代役：兵力太少的縣市每天自動補 1 名阿兵哥
         owned(f).forEach(id => { if (count(S.army[id]) < 2) addCapped(id, 'inf', 1); });
         if (f === S.player && S.mode === 'play') {
-          S.acted = new Set();
+          resetTurnActions();
           log(`🌅 第 ${S.day} 天，輪到你了！稅收 +${fmtMoney(inc)}`, 'me');
           // 自動選取老家（或任一己方縣市），招兵按鈕一開始就看得到
           if (!S.sel || S.owner[S.sel] !== S.player) S.sel = S.owner[S.player] === S.player ? S.player : owned(S.player)[0];
           render();
           return; // 等玩家按「結束回合」
         }
-        S.acted = new Set();
+        resetTurnActions();
         render();
         await aiTurn(f, gen);
         if (gen !== S.gen || S.over) return;
@@ -183,8 +230,9 @@
   async function doAttack(src, tgt, gen, half = false, deployment = null) {
     if (gen !== S.gen || S.over) return;
     const fa = S.owner[src], fd = S.owner[tgt];
-    const sent = deployment ? { ...deployment } : Combat.plan(S.army[src], S.units, half);
-    if (fa === fd || !ADJ[src].has(tgt) || S.acted.has(src) || stunned(src) || !Combat.validDeployment(S.army[src], sent, S.units)) return;
+    const pool = freshArmy(src);
+    const sent = deployment ? { ...deployment } : Combat.plan(pool, S.units, half);
+    if (fa === fd || !ADJ[src].has(tgt) || S.acted.has(src) || stunned(src) || !Combat.validDeployment(pool, sent, S.units)) return;
     for (const k of kinds(sent)) S.army[src][k] -= sent[k];
     S.acted.add(src);
     showArrow(src, tgt, byId[fa].color);
@@ -216,13 +264,18 @@
       claimSlots(tgt);
       S.army[tgt] = r.A;
       S.acted.add(tgt);
+      const arrived = Object.fromEntries(kinds(r.A).map(k => [k, r.A[k]]));
+      if (count(arrived)) S.moved[tgt] = arrived; else delete S.moved[tgt];
       popText(tgt, '攻陷！', '#ffd166');
       S.news.push({ kind: 'capture', fa, fd, tgt });
       log(`⚔️ ${fTag(fa)} 從 ${cTag(src)} 出兵攻下 ${cTag(tgt)}（${fTag(fd)}），折損 ${r.lostA} 兵`, fa === S.player ? 'me' : '');
       if (!owned(fd).length) eliminated(fd, fa);
     } else {
       S.army[tgt] = r.D;
-      for (const k of kinds(r.A)) addUnits(S.army[src], k, r.A[k]); // 殘兵撤回
+      clampMoved(tgt);
+      clampMoved(src);
+      for (const k of kinds(r.A)) addUnits(S.army[src], k, r.A[k]); // 殘兵撤回，今天不能再動
+      markMoved(src, r.A);
       popText(tgt, r.retreated ? '撤退' : '守住！', '#8ecae6');
       log(r.retreated ? `🏳️ ${fTag(fa)} 從 ${cTag(tgt)} 戰略撤退，殘兵返回 ${cTag(src)}（攻方損 ${r.lostA}、守方損 ${r.lostD}）`
         : `🛡️ ${cTag(tgt)} 擋下 ${fTag(fa)} 的進攻（攻方損 ${r.lostA}、守方損 ${r.lostD}）`, fd === S.player || fa === S.player ? 'me' : '');
@@ -291,7 +344,7 @@
     S.over = S.busy = false;
     S.current = S.player;
     S.turnIdx = S.order.indexOf(S.player);
-    S.acted = new Set();
+    resetTurnActions();
     S.expeditionPort = S.sel = 'keelung';
     hideModal();
     log('👾 統一之後，外星蟲洞出現！三天後首次空襲。從基隆、高雄、花蓮出征，清除三座前哨，再摧毀母艦。', 'big');
@@ -299,7 +352,7 @@
   }
   function expeditionAllowed(src, site) {
     return playerActive() && S.invasion?.status === 'active' && Invasion.PORTS.includes(src)
-      && S.owner[src] === S.player && !S.acted.has(src) && !stunned(src) && count(S.army[src]) > 1
+      && S.owner[src] === S.player && !S.acted.has(src) && !stunned(src) && count(freshArmy(src)) > 1
       && Invasion.unlocked(S.invasion, site) && !S.invasion.cleared.includes(site)
       && (!Invasion.SITES[site].port || Invasion.SITES[site].port === src);
   }
@@ -309,7 +362,7 @@
       defenderAttack: site === 'core' ? 1.2 : 1, attackerMoto: byId[src].moto || 1, adapt: 'D' };
   }
   async function doExpedition(src, site, sent, gen) {
-    if (gen !== S.gen || !expeditionAllowed(src, site) || !Combat.validDeployment(S.army[src], sent, S.units)) return;
+    if (gen !== S.gen || !expeditionAllowed(src, site) || !Combat.validDeployment(freshArmy(src), sent, S.units)) return;
     // Lock before yielding: double clicks cannot launch a second expedition.
     S.busy = true;
     S.acted.add(src);
@@ -331,7 +384,9 @@
     S.invasion.sites[site] = r.D;
     if (S.buff[src]) delete S.buff[src].atk;
     // Expeditions return to port instead of occupying an off-map base.
+    clampMoved(src);
     for (const k of kinds(r.A)) addUnits(S.army[src], k, r.A[k]);
+    markMoved(src, r.A);
     if (r.win) {
       S.invasion.cleared.push(site);
       S.money[S.player] += 120;
@@ -371,6 +426,7 @@
       S.busy = false;
     } else r = Combat.resolve(options);
     S.army[port] = r.D;
+    clampMoved(port);
     const damage = r.win ? 18 : 4;
     S.invasion.shield = Math.max(0, S.invasion.shield - damage);
     log(`🚨 外星空襲${cTag(port)}！${r.win ? '守軍遭突破' : '守軍攔截成功'}，守軍折損 ${r.lostD} 人，全台防線 -${damage}%（剩 ${S.invasion.shield}%）。`, 'big');
@@ -394,7 +450,8 @@
     $('#invasionStatus').textContent = inv.status === 'won' ? '母艦已摧毀，台灣守衛戰成功！' : inv.status === 'lost' ? '全台防線已被突破。' : `下次空襲：${next} 天後。三港守軍會影響防線損耗。`;
     $('#invasionSites').innerHTML = Object.entries(Invasion.SITES).map(([id, site]) => {
       const cleared = inv.cleared.includes(id), unlocked = Invasion.unlocked(inv, id);
-      const reason = cleared ? '已摧毀' : !unlocked ? '先清除三座前哨' : site.port && site.port !== port ? `需從${byId[site.port].short}出征` : S.acted.has(port) ? '本港今日已出征' : stunned(port) ? '港口暫時無法出兵' : count(S.army[port]) < 2 ? '港口兵力不足' : '配置部隊';
+      const portFresh = count(freshArmy(port)), portArmy = count(S.army[port]);
+      const reason = cleared ? '已摧毀' : !unlocked ? '先清除三座前哨' : site.port && site.port !== port ? `需從${byId[site.port].short}出征` : S.acted.has(port) ? '本港今日已出征' : stunned(port) ? '港口暫時無法出兵' : portFresh <= 1 && portArmy > 1 ? '調入的部隊今天不能出征' : portArmy < 2 ? '港口兵力不足' : '配置部隊';
       return `<div class="invasionSite ${cleared ? 'cleared' : ''}"><div><b>${site.icon} ${site.name}</b><small>${cleared ? '外星據點已清除' : `守軍 ${count(inv.sites[id])} 人`}</small></div><button data-site="${id}" ${expeditionAllowed(port, id) ? '' : 'disabled'}>${reason}</button></div>`;
     }).join('');
     $('#expeditionResult').textContent = S.lastExpedition ? `${S.lastExpedition.name}：${S.lastExpedition.win ? '摧毀' : '未攻下'}，我軍折損 ${S.lastExpedition.lostA}／敵軍折損 ${S.lastExpedition.lostD}` : '先調兵到對應港口，再配置出征部隊；每港每天限一次。';
@@ -416,6 +473,7 @@
   function lose(id, ratio) {
     let lost = 0;
     for (const k of kinds(S.army[id])) { const n = Math.floor(S.army[id][k] * ratio); S.army[id][k] -= n; lost += n; }
+    clampMoved(id);
     return lost;
   }
   // 依總兵力打掉一定比例（至少 1 人），隨機挑兵種
@@ -425,6 +483,7 @@
       const pool = kinds(S.army[id]).flatMap(k => Array(S.army[id][k]).fill(k));
       S.army[id][pick(pool)]--;
     }
+    clampMoved(id);
     return n;
   }
   function randomEvent() {
@@ -488,7 +547,7 @@
       if (gen !== S.gen || S.over) return;
       let best = null;
       for (const src of owned(f)) {
-        if (S.acted.has(src) || stunned(src) || count(S.army[src]) < 3) continue;
+        if (S.acted.has(src) || stunned(src) || count(S.army[src]) < 3 || count(freshArmy(src)) <= 1) continue;
         for (const tgt of enemiesOf(src)) {
           const vsPlayer = S.owner[tgt] === S.player;
           if (S.day <= (vsPlayer ? S.diff.playerPeace : S.diff.aiPeace)) continue;
@@ -554,6 +613,7 @@
       const to = [...ADJ[id]].find(n => S.owner[n] === f && dist[n] === dist[id] - 1);
       if (!to || !count(S.army[id])) return;
       moveTroops(id, to, false);
+      clampMoved(id);
     });
   }
 
@@ -695,8 +755,8 @@
 
   function borderThreat(id, defenders = S.army[id]) {
     const f = S.owner[id];
-    const threats = enemiesOf(id).filter(e => !stunned(e) && count(S.army[e]) > 1).map(e => {
-      const sent = Combat.plan(S.army[e], S.units);
+    const threats = enemiesOf(id).filter(e => !stunned(e) && count(freshArmy(e)) > 1).map(e => {
+      const sent = Combat.plan(freshArmy(e), S.units);
       return { id: e, troops: count(sent), ratio: power(sent, atkMult(S.owner[e], e)) / Math.max(1, power(defenders, defMult(f, id))) };
     }).sort((a, b) => b.ratio - a.ratio);
     const peace = f === S.player && S.day <= S.diff.playerPeace;
@@ -736,6 +796,7 @@
     }
     if (sel && sel !== id && !mine && ADJ[sel].has(id) && !S.acted.has(sel) && count(S.army[sel]) > 1) {
       if (stunned(sel)) return flash(`${byId[sel].short} 被困住了，到第 ${S.stun[sel]} 天都無法出兵`);
+      if (count(freshArmy(sel)) <= 1) return flash('調入的部隊今天不能出征');
       openAttack(sel, id);
       return;
     }
@@ -750,7 +811,7 @@
   }
 
   function openAttack(src, tgt, kind = 'county') {
-    S.attack = { src, tgt, kind, sent: Combat.plan(S.army[src], S.units, S.sendHalf) };
+    S.attack = { src, tgt, kind, sent: Combat.plan(freshArmy(src), S.units, S.sendHalf) };
     $('#attackDialog').hidden = false;
     $('#tip').hidden = true;
     renderAttack();
@@ -758,28 +819,30 @@
   }
   function renderAttack() {
     const { src, tgt, sent } = S.attack;
-    const total = count(sent), reserve = count(S.army[src]) - total;
+    const pool = freshArmy(src);
+    const total = count(sent), spare = count(pool) - total, home = count(S.army[src]) - total;
     const expedition = S.attack.kind === 'invasion';
     const targetName = expedition ? Invasion.SITES[tgt].name : byId[tgt].short;
     const options = expedition ? expeditionOptions(src, tgt, sent) : combatOptions(src, tgt, sent);
     $('#attackTitle').textContent = `${byId[src].short} → ${targetName}`;
     $('#attackHint').textContent = expedition ? '每港每日出征一次；戰鬥打到一方全滅（可戰略撤退），存活部隊返港，前哨守軍戰損保留。' : '每個縣市每日出兵一次；戰鬥打到一方全滅（可在戰鬥中戰略撤退），攻陷後駐守新領土。';
-    $('#attackForces').innerHTML = `<div><small>出征部隊</small><b>${total}<em> 人</em></b><span>本土留守 ${reserve} 人</span></div>
+    $('#attackForces').innerHTML = `<div><small>出征部隊</small><b>${total}<em> 人</em></b><span>本土留守 ${home} 人</span></div>
       <span class="versus">VS</span><div><small>${expedition ? '外星' : byId[S.owner[tgt]].short}守軍</small><b>${count(options.defenders)}<em> 人</em></b><span>防禦加成 ×${options.defenseMult.toFixed(2)}</span></div>`;
-    $('#attackRows').innerHTML = kinds(S.army[src]).map(k => `<div class="deployRow"><span>${unitIcon(k)} ${esc(U(k).name)}<small>${UNIT_CLASSES[U(k).cls]}・現有 ${S.army[src][k]}</small></span>
+    $('#attackRows').innerHTML = kinds(pool).map(k => `<div class="deployRow"><span>${unitIcon(k)} ${esc(U(k).name)}<small>${UNIT_CLASSES[U(k).cls]}・可出征 ${pool[k]}${S.army[src][k] > pool[k] ? `／現有 ${S.army[src][k]}` : ''}</small></span>
       <div class="deployControl"><button data-unit="${k}" data-delta="-1" aria-label="減少${esc(U(k).name)}" ${!sent[k] ? 'disabled' : ''}>−</button>
-      <input class="unitAmount" type="number" min="0" max="${Math.min(S.army[src][k], (sent[k] || 0) + reserve - 1)}" value="${sent[k] || 0}" data-amount="${k}" aria-label="${esc(U(k).name)}出征人數"><button data-unit="${k}" data-delta="1" aria-label="增加${esc(U(k).name)}" ${sent[k] >= S.army[src][k] || reserve <= 1 ? 'disabled' : ''}>＋</button></div></div>`).join('');
-    const valid = Combat.validDeployment(S.army[src], sent, S.units);
+      <input class="unitAmount" type="number" min="0" max="${Math.min(pool[k], (sent[k] || 0) + spare - 1)}" value="${sent[k] || 0}" data-amount="${k}" aria-label="${esc(U(k).name)}出征人數"><button data-unit="${k}" data-delta="1" aria-label="增加${esc(U(k).name)}" ${(sent[k] || 0) >= pool[k] || spare <= 1 ? 'disabled' : ''}>＋</button></div></div>`).join('');
+    const valid = Combat.validDeployment(pool, sent, S.units);
     const estimate = valid ? Combat.estimate(options) : null;
+    const movedBlock = count(pool) <= 1 && count(S.army[src]) > count(pool);
     $('#attackEstimate').innerHTML = estimate ? `<div class="estimateTop"><span>預估攻陷機率</span><b class="${estimate.chance >= 65 ? 'hl-g' : 'hl-r'}">${estimate.chance}%</b></div>
       <div class="estimateBar"><i style="width:${estimate.chance}%"></i></div>
       <p>平均折損：我軍 ${estimate.lostA} 人／守軍 ${estimate.lostD} 人</p>
-      <small>依目前兵種相剋、研發、地域與技能加成模擬 160 次；實戰仍有隨機性。</small>` : '<p>請選擇至少 1 名出征部隊，並留 1 人守家。</p>';
-    $('#deploymentSize').max = Math.max(0, count(S.army[src]) - 1);
+      <small>依目前兵種相剋、研發、地域與技能加成模擬 160 次；實戰仍有隨機性。</small>` : movedBlock ? '<p>調入的部隊今天不能出征</p>' : '<p>請選擇至少 1 名出征部隊，並留 1 人守家。</p>';
+    $('#deploymentSize').max = Math.max(0, count(pool) - 1);
     $('#deploymentSize').value = total;
-    const reserveArmy = Object.fromEntries(kinds(S.army[src]).map(k => [k, S.army[src][k] - (sent[k] || 0)]));
+    const reserveArmy = Object.fromEntries(kinds(S.army[src]).map(k => [k, Math.max(0, S.army[src][k] - (sent[k] || 0))]));
     const risk = borderThreat(src, reserveArmy);
-    $('#reserveWarning').textContent = `${reserve} 人留守${byId[src].short}。` + (risk.peace ? '目前仍在和平期。' : risk.level === 'high' ? '⚠️ 鄰國兵力明顯超過留守部隊，可能遭到反攻。' : risk.threats.length ? '鄰國可能反攻，請搭配駐防與要塞。' : S.invasion ? '請保留守軍應對外星空襲。' : '目前無相鄰敵軍。');
+    $('#reserveWarning').textContent = `${home} 人留守${byId[src].short}。` + (risk.peace ? '目前仍在和平期。' : risk.level === 'high' ? '⚠️ 鄰國兵力明顯超過留守部隊，可能遭到反攻。' : risk.threats.length ? '鄰國可能反攻，請搭配駐防與要塞。' : S.invasion ? '請保留守軍應對外星空襲。' : '目前無相鄰敵軍。');
     $('#reserveWarning').className = 'reserveWarning' + (!risk.peace && risk.level === 'high' ? ' danger' : '');
     $('#attackConfirm').disabled = !valid;
     $('#attackConfirm').textContent = `⚔️ 確認出征 ${total} 人`;
@@ -788,28 +851,31 @@
     const b = e.target.closest('button[data-unit]');
     if (!b || !S.attack) return;
     const { src, sent } = S.attack, k = b.dataset.unit, delta = Number(b.dataset.delta);
-    if (delta > 0 && count(sent) >= count(S.army[src]) - 1) return;
-    sent[k] = Math.max(0, Math.min(S.army[src][k], (sent[k] || 0) + delta));
+    const pool = freshArmy(src);
+    if (delta > 0 && count(sent) >= count(pool) - 1) return;
+    sent[k] = Math.max(0, Math.min(pool[k] || 0, (sent[k] || 0) + delta));
     renderAttack();
   });
   $('#attackRows').addEventListener('change', e => {
     const k = e.target.dataset.amount;
     if (!S.attack || !k || !Object.hasOwn(S.army[S.attack.src], k)) return;
     const { src, sent } = S.attack;
+    const pool = freshArmy(src);
     const other = count(sent) - (sent[k] || 0);
     const value = Number(e.target.value);
-    sent[k] = Math.max(0, Math.min(S.army[src][k], count(S.army[src]) - 1 - other, Number.isFinite(value) ? Math.floor(value) : 0));
+    sent[k] = Math.max(0, Math.min(pool[k] || 0, Math.max(0, count(pool) - 1 - other), Number.isFinite(value) ? Math.floor(value) : 0));
     renderAttack();
   });
   $('#deploymentSize').addEventListener('change', e => {
     if (!S.attack) return;
-    S.attack.sent = Combat.planSize(S.army[S.attack.src], S.units, e.target.value);
+    S.attack.sent = Combat.planSize(freshArmy(S.attack.src), S.units, e.target.value);
     renderAttack();
   });
   $('#attackPresets').addEventListener('click', e => {
     const b = e.target.closest('button[data-plan]');
     if (!b || !S.attack) return;
-    S.attack.sent = /^\d+$/.test(b.dataset.plan) ? Combat.planSize(S.army[S.attack.src], S.units, Number(b.dataset.plan)) : b.dataset.plan === 'none' ? {} : Combat.plan(S.army[S.attack.src], S.units, b.dataset.plan === 'half');
+    const pool = freshArmy(S.attack.src);
+    S.attack.sent = /^\d+$/.test(b.dataset.plan) ? Combat.planSize(pool, S.units, Number(b.dataset.plan)) : b.dataset.plan === 'none' ? {} : Combat.plan(pool, S.units, b.dataset.plan === 'half');
     renderAttack();
   });
   $('#attackCancel').addEventListener('click', () => { $('#attackDialog').hidden = true; S.attack = null; });
@@ -817,13 +883,13 @@
     if (!playerActive() || !S.attack) return;
     const { src, tgt, sent, kind } = S.attack;
     if (kind === 'invasion') {
-      if (!expeditionAllowed(src, tgt) || !Combat.validDeployment(S.army[src], sent, S.units)) return;
+      if (!expeditionAllowed(src, tgt) || !Combat.validDeployment(freshArmy(src), sent, S.units)) return;
       $('#attackDialog').hidden = true;
       S.attack = null;
       await doExpedition(src, tgt, sent, S.gen);
       return;
     }
-    if (S.owner[src] !== S.player || S.owner[tgt] === S.player || S.acted.has(src) || stunned(src) || !Combat.validDeployment(S.army[src], sent, S.units)) return;
+    if (S.owner[src] !== S.player || S.owner[tgt] === S.player || S.acted.has(src) || stunned(src) || !Combat.validDeployment(freshArmy(src), sent, S.units)) return;
     $('#attackDialog').hidden = true;
     S.attack = null;
     S.busy = true;
@@ -858,45 +924,73 @@
     $('#transfer').hidden = false;
     renderTransfer();
   }
+  function limitTransferAmt(tr) {
+    const fresh = freshArmy(tr.from);
+    for (const k of Object.keys(tr.amt)) {
+      const n = Number.isInteger(tr.amt[k]) ? Math.min(Math.max(0, tr.amt[k]), fresh[k] || 0) : 0;
+      if (n > 0) tr.amt[k] = n; else delete tr.amt[k];
+    }
+    const cap = Math.min(room(tr.to), Math.max(0, count(S.army[tr.from]) - 1));
+    if (count(tr.amt) > cap) {
+      const trimmed = trimTo(cap, tr.amt);
+      for (const k of Object.keys(tr.amt)) delete tr.amt[k];
+      Object.assign(tr.amt, trimmed);
+    }
+  }
   function renderTransfer() {
+    limitTransferAmt(S.tr);
     const { from, to, amt } = S.tr;
-    const total = Object.values(amt).reduce((a, b) => a + b, 0);
+    const fresh = freshArmy(from);
+    const total = count(amt);
     const space = room(to);
     const src = S.army[from];
+    const cap = Math.min(space, Math.max(0, count(src) - 1));
+    const actedN = count(src) - count(fresh);
     $('#trTitle').innerHTML = `🚚 從 ${cTag(from)} 調兵到 ${cTag(to)}`;
-    $('#trRows').innerHTML = kinds(src).map(k => `<div class="trRow">
-      <span class="trName">${unitIcon(k)} ${esc(U(k).name)}<small>現有 ${src[k]}</small></span>
+    $('#trRows').innerHTML = kinds(fresh).map(k => `<div class="trRow">
+      <span class="trName">${unitIcon(k)} ${esc(U(k).name)}<small>可調 ${fresh[k]}${src[k] > fresh[k] ? `／現有 ${src[k]}` : ''}</small></span>
       <span class="trCtl">
         <button data-k="${k}" data-d="-1" ${!amt[k] ? 'disabled' : ''}>−</button>
         <b>${amt[k] || 0}</b>
-        <button data-k="${k}" data-d="1" ${(amt[k] || 0) >= src[k] || total >= space ? 'disabled' : ''}>＋</button>
-        <button data-k="${k}" data-d="max" ${(amt[k] || 0) >= src[k] || total >= space ? 'disabled' : ''}>全部</button>
+        <button data-k="${k}" data-d="1" ${(amt[k] || 0) >= fresh[k] || total >= cap ? 'disabled' : ''}>＋</button>
+        <button data-k="${k}" data-d="max" ${(amt[k] || 0) >= fresh[k] || total >= cap ? 'disabled' : ''}>全部</button>
       </span>
-    </div>`).join('') || '<p class="hint">這個縣市沒有部隊可以調</p>';
-    $('#trInfo').innerHTML = `${cTag(from)} ${count(src)} → ${count(src) - total} 人｜${cTag(to)} ${count(S.army[to])} → ${count(S.army[to]) + total} / ${MAX_TROOPS} 人${space === 0 ? '<b class="hl-r">（目標已滿）</b>' : ''}`;
+    </div>`).join('') || `<p class="hint">${count(src) ? '已行動的部隊今天不能再調動' : '這個縣市沒有部隊可以調'}</p>`;
+    $('#trInfo').innerHTML = `${cTag(from)} ${count(src)} → ${count(src) - total} 人｜${cTag(to)} ${count(S.army[to])} → ${count(S.army[to]) + total} / ${MAX_TROOPS} 人${space === 0 ? '<b class="hl-r">（目標已滿）</b>' : ''}${actedN ? `｜已行動 ${actedN} 人今天不能調` : ''}`;
     $('#trOk').disabled = total === 0;
     $('#trOk').textContent = `確認調動 ${total} 人`;
   }
   function changeTransfer(k, d) {
-    const { to, amt } = S.tr;
-    const have = S.army[S.tr.from][k];
-    const total = Object.values(amt).reduce((a, b) => a + b, 0);
+    if (!S.tr || !Object.hasOwn(S.units, k)) return;
+    const { from, to, amt } = S.tr;
+    const have = freshArmy(from)[k] || 0;
+    const total = count(amt);
     const cur = amt[k] || 0;
-    const free = room(to) - total;
-    amt[k] = d === 'max' ? Math.min(have, cur + free) : Math.max(0, Math.min(have, cur + Number(d), cur + free));
+    const cap = Math.min(room(to), Math.max(0, count(S.army[from]) - 1));
+    const maxNext = Math.max(0, Math.min(have, cap - (total - cur)));
+    amt[k] = d === 'max' ? maxNext : Math.max(0, Math.min(maxNext, cur + Number(d)));
+    if (!amt[k]) delete amt[k];
     renderTransfer();
   }
   function confirmTransfer() {
+    if (!playerActive() || !S.tr) return;
     const { from, to, amt } = S.tr;
+    if (!from || !to || from === to || S.owner[from] !== S.player || S.owner[to] !== S.player) return;
+    const asked = Object.values(amt).some(n => n > 0);
+    limitTransferAmt(S.tr);
+    const moving = {};
+    for (const k of kinds(amt)) moving[k] = amt[k];
     let moved = 0;
-    for (const k of Object.keys(amt)) {
-      const n = Math.min(amt[k], S.army[from][k] || 0, room(to));
-      S.army[from][k] -= n;
-      addUnits(S.army[to], k, n);
-      moved += n;
+    clampMoved(to);
+    for (const k of kinds(moving)) {
+      S.army[from][k] -= moving[k];
+      addUnits(S.army[to], k, moving[k]);
+      moved += moving[k];
     }
+    if (moved) markMoved(to, moving);
     $('#transfer').hidden = true;
     if (moved) log(`🚚 從 ${cTag(from)} 調 ${moved} 兵到 ${cTag(to)}`, 'me');
+    else if (asked) flash(!count(freshArmy(from)) && count(S.army[from]) > 1 ? '已行動的部隊今天不能再調動' : !room(to) ? `${byId[to].short}已滿 ${MAX_TROOPS} 人` : '至少留 1 人守家');
     S.sel = to;
     render();
   }
@@ -912,6 +1006,7 @@
     if (!room(id)) return flash(`每個縣市最多 ${MAX_TROOPS} 名戰鬥人員`);
     if (S.money[S.player] < cost) return flash('錢不夠！');
     S.money[S.player] -= cost;
+    clampMoved(id);
     addUnits(S.army[id], k, 1);
     flash(`${esc(U(k).name)} +1　💰 -${cost} 萬（剩 ${fmtMoney(S.money[S.player])}）`, 'good');
     render();
@@ -1160,8 +1255,14 @@
   let box = null, aimEl = null;
   const pickedCells = id => S.aim?.src === id ? S.aim.cells : box?.src === id ? box.cells : new Set();
   function pickedArmy(src, cells) {
-    const units = cellUnits(S.army[src]), out = {};
-    for (const i of cells) if (units[i]) addUnits(out, units[i], 1);
+    const units = cellUnits(S.army[src]), fresh = freshArmy(src), out = {};
+    for (const i of cells) {
+      const k = units[i];
+      if (!k) continue;
+      let pos = 0;
+      for (let j = 0; j < i; j++) if (units[j] === k) pos++;
+      if (pos < (fresh[k] || 0)) addUnits(out, k, 1);
+    }
     return out;
   }
   function startAim(src, cells) {
@@ -1191,6 +1292,7 @@
     if (S.acted.has(src)) return { kind: null, reason: `${byId[src].short}今天已經出兵過了` };
     if (stunned(src)) return { kind: null, reason: `${byId[src].short}被困住了，到第 ${S.stun[src]} 天都無法出兵` };
     if (count(S.army[src]) < 2) return { kind: null, reason: '至少要留 1 人守家' };
+    if (count(freshArmy(src)) <= 1) return { kind: null, reason: '調入的部隊今天不能出征' };
     return { kind: 'attack' };
   }
   function aimAt(id) {
@@ -1201,16 +1303,30 @@
     const sent = pickedArmy(src, cells);
     clearAim();
     if (t.kind === 'move') {
-      let moved = 0;
-      for (const k of kinds(sent)) { const n = addCapped(id, k, Math.min(sent[k], S.army[src][k])); S.army[src][k] -= n; moved += n; }
+      if (!count(sent)) return flash('已行動的部隊今天不能再調動');
+      const wanted = transferable(src, sent);
+      let space = room(id), moving = {};
+      for (const k of kinds(wanted)) {
+        const n = Math.min(wanted[k], space);
+        if (n) { moving[k] = n; space -= n; }
+      }
+      const moved = count(moving);
+      if (!moved) return flash(count(S.army[src]) <= 1 ? '至少留 1 人守家' : `${byId[id].short}已滿 ${MAX_TROOPS} 人`);
+      clampMoved(id);
+      for (const k of kinds(moving)) { S.army[src][k] -= moving[k]; addUnits(S.army[id], k, moving[k]); }
+      markMoved(id, moving);
       log(`🚚 從 ${cTag(src)} 調 ${moved} 兵到 ${cTag(id)}`, 'me');
-      if (moved < count(sent)) flash(`${byId[id].short}只塞得下 ${moved} 人`);
+      if (moved < count(sent) && space === 0) flash(`${byId[id].short}只塞得下 ${moved} 人`);
       S.sel = id;
       render();
       return;
     }
-    // 全選時自動留 1 人守家（留最便宜的兵）
-    if (count(sent) >= count(S.army[src])) sent[kinds(sent).sort((a, b) => U(a).cost - U(b).cost)[0]]--;
+    // 全選新鮮部隊時自動留 1 人守家（留最便宜的兵）
+    if (count(sent) >= count(freshArmy(src)) && count(sent)) {
+      const cheapest = kinds(sent).sort((a, b) => U(a).cost - U(b).cost)[0];
+      if (--sent[cheapest] <= 0) delete sent[cheapest];
+    }
+    if (!count(sent)) return flash('調入的部隊今天不能出征');
     render();
     openAttack(src, id);
     S.attack.sent = sent;
@@ -1234,7 +1350,7 @@
     aimEl.label.setAttribute('x', mx);
     aimEl.label.setAttribute('y', my);
     aimEl.label.setAttribute('fill', color);
-    const n = S.aim.cells.size, keep = t.kind === 'attack' && n >= count(S.army[src]); // 進攻時全選會自動留 1 人守家
+    const n = count(pickedArmy(src, S.aim.cells)), keep = t.kind === 'attack' && n > 0 && n >= count(freshArmy(src)); // 進攻時把新鮮部隊全選會自動留 1 人守家
     aimEl.label.textContent = `${keep ? n - 1 : n} 人${t.kind === 'attack' ? ' ⚔️ 進攻' : t.kind === 'move' ? ' 🚚 調兵' : ''}${keep ? '（留 1 守家）' : ''}`;
   }
   const mapSvg = $('#map');
@@ -1365,7 +1481,7 @@
   function render() {
     if (!S.owner) return;
     const sel = S.sel;
-    const canAct = playerActive() && sel && S.owner[sel] === S.player && !S.acted.has(sel) && !stunned(sel) && count(S.army[sel]) > 1;
+    const canAct = playerActive() && sel && S.owner[sel] === S.player && !S.acted.has(sel) && !stunned(sel) && count(freshArmy(sel)) > 1;
     const reach = S.transferMode && playerActive() && sel ? reachable(sel) : new Set();
     for (const c of COUNTIES) {
       const id = c.id, f = S.owner[id];
@@ -1440,8 +1556,9 @@
       <div><h3>${c.name} <small>${c.nick}</small></h3><div class="sub">${region.name}・稅收 ${c.econ} 萬・控制者 ${fTag(f)}</div></div></div></div>
       <div class="trait">✨ ${c.trait}</div>
       <div class="army">${armyHtml(a)}</div>
-      ${troopGrid(a)}
-      <div class="cap ${count(a) >= MAX_TROOPS ? 'full' : ''}">兵力 ${count(a)} / ${MAX_TROOPS}${count(a) >= MAX_TROOPS ? '（已滿）' : ''}</div>`;
+      ${troopGrid(id)}
+      <div class="cap ${count(a) >= MAX_TROOPS ? 'full' : ''}">兵力 ${count(a)} / ${MAX_TROOPS}${count(a) >= MAX_TROOPS ? '（已滿）' : ''}</div>
+      ${count(a) - count(freshArmy(id)) > 0 ? `<p class="hint">已行動 ${count(a) - count(freshArmy(id))} 人（今日不能再出征或調動）</p>` : ''}`;
     const status = [
       atkBuff(id) > 1 ? `⚔️ 下次進攻 ×${atkBuff(id)}` : '',
       defBuff(id) > 1 ? `🛡️ 防禦 ×${defBuff(id)}（到第 ${S.buff[id].defUntil} 天）` : '',
@@ -1466,7 +1583,7 @@
         <button id="trBtn" class="trBtn ${S.transferMode ? 'on' : ''}" ${reachable(id).size ? '' : 'disabled'}>🚚 ${S.transferMode ? '點地圖上綠框的己方縣市（再按一次取消）' : reachable(id).size ? '調兵到其他己方縣市' : '調兵（還沒有其他相連的己方縣市）'}</button>
         <label class="half"><input type="checkbox" id="halfChk" ${S.sendHalf ? 'checked' : ''}> 進攻時只派一半兵力（其餘留守）</label>
         <p class="hint boxHint">🖱️ 在地圖的兵力格上<b>拖曳框選</b>士兵（縮小時從縣市圓點拖曳＝全軍），再點目標：<b class="hl-r">紅色箭頭</b>進攻、<b class="hl-b">藍色箭頭</b>調兵</p>
-        <p class="hint">${stunned(id) ? `😵 被困住了，到第 ${S.stun[id]} 天都無法出兵` : acted ? '⛔ 這個縣市今天已經出兵過了（還能招兵、調兵）' : count(a) > 1 ? '👉 點擊<b class="hl-r">閃爍紅框</b>的敵方縣市，配置出征部隊' : count(a) === 1 ? '至少留 1 人守家，招兵後才能出征' : '先招兵才能出擊'}</p>`;
+        <p class="hint">${stunned(id) ? `😵 被困住了，到第 ${S.stun[id]} 天都無法出兵` : acted ? '⛔ 這個縣市今天已經出兵過了（還能招兵、調兵）' : count(freshArmy(id)) <= 1 && count(a) > 1 ? '⛔ 調入的部隊今天不能出征' : count(a) > 1 ? '👉 點擊<b class="hl-r">閃爍紅框</b>的敵方縣市，配置出征部隊' : count(a) === 1 ? '至少留 1 人守家，招兵後才能出征' : '先招兵才能出擊'}</p>`;
     }
     box.innerHTML = html;
   }
@@ -1479,10 +1596,11 @@
       card.name.textContent = `${c.short} ${count(a)}`;
       card.g.classList.toggle('mine', S.mode === 'play' && f === S.player);
       card.g.classList.toggle('selected', id === S.sel);
-      const units = cellUnits(a), picked = pickedCells(id);
+      const units = cellUnits(a), picked = pickedCells(id), fresh = freshArmy(id), seen = {};
       card.cells.forEach((cell, i) => {
         const k = units[i];
-        cell.rect.setAttribute('class', 'ccell' + (k ? ' cls-' + U(k).cls : '') + (k && picked.has(i) ? ' picked' : ''));
+        const actedCell = k && ((seen[k] = (seen[k] || 0) + 1) > (fresh[k] || 0));
+        cell.rect.setAttribute('class', 'ccell' + (k ? ' cls-' + U(k).cls : '') + (actedCell ? ' acted' : '') + (k && picked.has(i) ? ' picked' : ''));
         // 基本兵種用 sprite；自組兵種的 icon 本身就是圖片路徑
         const sprite = k && (U(k).sprite || (U(k).icon.startsWith('assets/') ? U(k).icon : null));
         if (sprite) cell.img.setAttribute('href', sprite);
@@ -1500,10 +1618,14 @@
   }
 
   // 5×5 兵力格：每格一名戰鬥人員
-  function troopGrid(a) {
-    const cells = cellUnits(a);
-    return `<div class="tgrid">${Array.from({ length: MAX_TROOPS }, (_, i) =>
-      `<span class="tcell ${cells[i] ? 'cls-' + U(cells[i]).cls : ''}">${cells[i] ? unitIcon(cells[i], 'tcellImg') : ''}</span>`).join('')}</div>`;
+  function troopGrid(id) {
+    const cells = cellUnits(S.army[id]), fresh = freshArmy(id), seen = {};
+    return `<div class="tgrid">${Array.from({ length: MAX_TROOPS }, (_, i) => {
+      const k = cells[i];
+      if (!k) return '<span class="tcell"></span>';
+      const actedCell = (seen[k] = (seen[k] || 0) + 1) > (fresh[k] || 0);
+      return `<span class="tcell cls-${U(k).cls}${actedCell ? ' acted' : ''}">${unitIcon(k, 'tcellImg')}</span>`;
+    }).join('')}</div>`;
   }
 
   function oddsHtml(tgt) {
