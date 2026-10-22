@@ -1997,7 +1997,8 @@
       return;
     }
     if (!$('#attackDialog').hidden || !$('#modal').hidden || !$('#designer').hidden || !$('#transfer').hidden || !$('#skillPicker').hidden || e.target.tagName === 'INPUT') return;
-    if (e.key === 'Enter' || e.key === 'e') requestEndTurn();
+    // Enter 在按鈕上會再觸發一次 click；交給按鈕，避免確認被同一下按鍵跳過。e 仍全域有效。
+    if (e.key === 'e' || (e.key === 'Enter' && e.target.tagName !== 'BUTTON')) requestEndTurn();
     if (e.key === 'Escape') { S.sel = null; S.transferMode = false; clearAim(); render(); }
   });
 

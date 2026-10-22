@@ -1290,6 +1290,21 @@ test('end-turn confirmation reverts without ending, and a direct end still works
   assert.notEqual(h.S.current, 'taipei');
 });
 
+test('Enter on a focused button does not skip the end-turn confirmation', () => {
+  const f = fixture(), { h, get } = f;
+  get('#modal').hidden = true;
+  h.render();
+  const btn = get('#endTurn');
+  const press = (key, target) => f.listeners.keydown.at(-1)({ key, preventDefault() {}, target });
+  // One Enter on a focused button: keydown, then the browser's native click.
+  press('Enter', { tagName: 'BUTTON' });
+  btn.handlers.click();
+  assert.equal(h.S.current, 'taipei');
+  assert.equal(btn.classList.contains('confirming'), true);
+  press('e', { tagName: 'BUTTON' });
+  assert.notEqual(h.S.current, 'taipei');
+});
+
 test('mute shortcut stays quiet without Sfx and ignores text fields', () => {
   const f = fixture();
   const press = (key, target) => f.listeners.keydown.at(-1)({ key, repeat: false, preventDefault() {}, target: target || { tagName: 'DIV' } });
