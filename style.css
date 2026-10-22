@@ -126,6 +126,12 @@ main { flex: 1; display: flex; min-height: 0; }
 #research { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; margin-bottom: 10px; }
 #research .res { font-size: 12px; padding: 6px 4px; line-height: 1.3; }
 #endTurn { width: 100%; padding: 10px; font-size: 16px; }
+#endTurn.confirming {
+  background: var(--red);
+  border-color: #ffd166;
+  color: #fff;
+  box-shadow: 0 0 0 3px rgba(239, 71, 111, .45);
+}
 
 .ihead { display: flex; gap: 10px; align-items: center; }
 .county-hero { display: flex; align-items: center; gap: 8px; min-height: 92px; }
