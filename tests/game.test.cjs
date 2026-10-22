@@ -44,7 +44,7 @@ function fixture() {
   }`, context);
   let source = fs.readFileSync('js/game.js', 'utf8');
   const at = source.lastIndexOf('})();');
-  source = source.slice(0, at) + `Object.assign(harness, { S, initState, runLoop, endPlayerTurn, doAttack, saveCheckpoint, loadCheckpoint, saveRules, render, buildFacility, produceBuildings, income, defMult, openAttack, showStart, newGame, recruit, confirmTransfer, checkEnd, startInvasion, doExpedition, invasionRaid, expeditionAllowed, borderThreat, setPosture, atkMult, aiTurn, BV, startAim, aimAt, pickedArmy, nextTurn, openSkillPicker, useSkill, aiUseSkills });` + source.slice(at);
+  source = source.slice(0, at) + `Object.assign(harness, { S, initState, runLoop, endPlayerTurn, doAttack, saveCheckpoint, loadCheckpoint, saveRules, render, buildFacility, produceBuildings, income, defMult, openAttack, showStart, newGame, recruit, confirmTransfer, changeTransfer, freshArmy, checkEnd, startInvasion, doExpedition, invasionRaid, expeditionAllowed, borderThreat, setPosture, atkMult, aiTurn, BV, startAim, aimAt, pickedArmy, nextTurn, openSkillPicker, useSkill, aiUseSkills });` + source.slice(at);
   vm.runInContext(source, context);
   const h = context.harness;
   h.initState('play', 'taipei');
@@ -700,4 +700,172 @@ test('in battle the player picks a row, then clicks an enemy row to target it', 
   assert.equal(h.BV.st.aimA.moto, 'art');
   assert.match(get('#bsField').innerHTML, /🎯 第 \d 排/);
   await f.flush(); await battle;
+});
+
+test('transferred troops cannot attack or move again the same turn, and a county keeps one soldier', async () => {
+  const f = fixture(), { h, get } = f;
+  h.S.owner.newtaipei = 'taipei';
+  h.S.army.taipei = { inf: 5 };
+  h.S.army.newtaipei = {};
+  h.S.army.keelung = {};
+  h.S.tr = { from: 'taipei', to: 'newtaipei', amt: { inf: 5 } };
+  h.confirmTransfer();
+  assert.equal(h.S.army.taipei.inf, 1, 'transfer leaves one soldier at home');
+  assert.equal(h.S.army.newtaipei.inf, 4);
+  assert.deepEqual({ ...h.S.moved.newtaipei }, { inf: 4 });
+  assert.equal(h.S.moved.taipei, undefined);
+
+  h.S.tr = { from: 'newtaipei', to: 'taipei', amt: { inf: 4 } };
+  h.confirmTransfer();
+  assert.equal(h.S.army.newtaipei.inf, 4, 'transferred troops cannot move back');
+  assert.equal(h.S.army.taipei.inf, 1);
+
+  const before = JSON.stringify(h.S.army);
+  await h.doAttack('newtaipei', 'keelung', h.S.gen, false, { inf: 3 });
+  assert.equal(h.S.owner.keelung, 'keelung');
+  assert.equal(JSON.stringify(h.S.army), before);
+  assert.equal(h.S.acted.has('newtaipei'), false);
+  h.S.sel = 'newtaipei';
+  h.render();
+  assert.match(get('#info').innerHTML, /已行動 4 人（今日不能再出征或調動）/);
+  assert.match(get('#info').innerHTML, /調入的部隊今天不能出征/);
+
+  h.openAttack('newtaipei', 'keelung');
+  assert.match(get('#attackEstimate').innerHTML, /調入的部隊今天不能出征/);
+  assert.equal(get('#attackConfirm').disabled, true);
+});
+
+test('only fresh troops can be selected, and the attack dialog will not deploy moved ones', () => {
+  const { h, get } = fixture();
+  h.S.owner.newtaipei = 'taipei';
+  h.S.army.taipei = { inf: 4 };
+  h.S.army.newtaipei = { inf: 24 };
+  h.S.moved = { taipei: { inf: 2 } };
+  h.S.tr = { from: 'taipei', to: 'newtaipei', amt: {} };
+  h.changeTransfer('inf', 'max');
+  assert.equal(h.S.tr.amt.inf, 1, 'destination room and fresh count both cap the transfer');
+
+  h.S.army.newtaipei = {};
+  h.S.moved = {};
+  h.S.army.taipei = { inf: 5 };
+  h.S.tr = { from: 'taipei', to: 'newtaipei', amt: {} };
+  h.changeTransfer('inf', 'max');
+  assert.equal(h.S.tr.amt.inf, 4);
+
+  h.S.army.taipei = { inf: 4 };
+  h.S.moved = { taipei: { inf: 3 } };
+  assert.deepEqual({ ...h.pickedArmy('taipei', [1, 2, 3]) }, {});
+  assert.deepEqual({ ...h.pickedArmy('taipei', [0, 1]) }, { inf: 1 });
+  assert.ok(h.startAim('taipei', [1, 2, 3]));
+  h.aimAt('newtaipei');
+  assert.equal(Combat.count(h.S.army.newtaipei), 0);
+  assert.equal(h.S.army.taipei.inf, 4);
+
+  h.S.owner.newtaipei = 'newtaipei';
+  h.S.army.newtaipei = { inf: 4 };
+  h.S.army.taipei = { inf: 4 };
+  h.S.moved = { taipei: { inf: 2 } };
+  assert.ok(h.startAim('taipei', [0, 1, 2, 3]));
+  h.aimAt('newtaipei');
+  assert.equal(get('#attackDialog').hidden, false);
+  assert.deepEqual({ ...h.S.attack.sent }, { inf: 1 });
+  assert.match(get('#attackRows').innerHTML, /可出征 2/);
+});
+
+test('an inactive player cannot transfer, and new recruits stay fresh after losses clamp moved', () => {
+  const { h } = fixture();
+  h.S.owner.newtaipei = 'taipei';
+  h.S.army.taipei = { inf: 4 };
+  h.S.army.newtaipei = {};
+  h.S.current = null;
+  h.S.tr = { from: 'taipei', to: 'newtaipei', amt: { inf: 3 } };
+  h.confirmTransfer();
+  assert.equal(h.S.army.taipei.inf, 4);
+  assert.equal(Combat.count(h.S.army.newtaipei), 0);
+
+  h.S.current = 'taipei';
+  h.S.owner.newtaipei = 'newtaipei';
+  h.S.army.newtaipei = { inf: 10 };
+  h.S.moved = { newtaipei: { inf: 8, moto: 1 } };
+  assert.ok(h.useSkill('taipei', 0));
+  assert.equal(h.S.army.newtaipei.inf, 7);
+  assert.equal(h.S.moved.newtaipei.inf, 7);
+  assert.equal(h.S.moved.newtaipei.moto, undefined);
+
+  h.S.army.taipei = { inf: 4 };
+  h.S.moved.taipei = { inf: 4 };
+  h.S.money.taipei = 100;
+  h.S.sel = 'taipei';
+  h.recruit('inf');
+  assert.equal(h.S.army.taipei.inf, 5);
+  assert.equal(h.S.moved.taipei.inf, 4);
+  assert.deepEqual({ ...h.freshArmy('taipei') }, { inf: 1 });
+});
+
+test('capture and retreat mark the soldiers who already fought', async () => {
+  const f = fixture(), { h, get } = f;
+  h.S.speed = 99;
+  h.S.army.taipei = { inf: 5 };
+  h.S.army.newtaipei = {};
+  h.S.moved = { newtaipei: { moto: 2 } };
+  const win = h.doAttack('taipei', 'newtaipei', h.S.gen, false, { inf: 3 });
+  await f.flush(); await win;
+  assert.equal(h.S.owner.newtaipei, 'taipei');
+  assert.deepEqual({ ...h.S.moved.newtaipei }, { inf: 3 });
+  assert.equal(h.S.moved.newtaipei.moto, undefined);
+  assert.equal(h.S.moved.taipei, undefined);
+  assert.deepEqual({ ...h.freshArmy('taipei') }, { inf: 2 });
+
+  h.S.speed = 1;
+  h.S.acted.clear();
+  h.S.army.taipei = { inf: 21 };
+  h.S.army.newtaipei = { gen: 20 };
+  h.S.owner.newtaipei = 'newtaipei';
+  const battle = h.doAttack('taipei', 'newtaipei', h.S.gen, false, { inf: 20 });
+  await untilStep(f, 1);
+  get('#bsRetreat').handlers.click();
+  await f.flush(); await battle;
+  const back = Combat.count(h.S.lastBattle.A);
+  assert.ok(h.S.lastBattle.retreated);
+  assert.ok(back > 0);
+  assert.equal(h.S.moved.taipei.inf, back);
+  assert.deepEqual({ ...h.freshArmy('taipei') }, { inf: 1 });
+  assert.equal(h.S.owner.newtaipei, 'newtaipei');
+});
+
+test('moved troops reset on the next turn and round-trip through old and new saves', async () => {
+  const f = fixture(), { h } = f;
+  h.S.army.taipei = { inf: 4, moto: 1 };
+  h.S.army.keelung = { art: 2 };
+  h.S.moved = { taipei: { inf: 2 }, keelung: { art: 1 } };
+  const bag = moved => JSON.parse(JSON.stringify(moved));
+  const loaded = GameSaves.decode(GameSaves.encode(h.S), h.saveRules);
+  assert.deepEqual(bag(loaded.data.moved), { taipei: { inf: 2 }, keelung: { art: 1 } });
+  assert.ok(h.saveCheckpoint('manual'));
+  h.S.moved = {};
+  h.loadCheckpoint('manual');
+  assert.deepEqual(bag(h.S.moved), { taipei: { inf: 2 }, keelung: { art: 1 } });
+
+  const old = JSON.parse(GameSaves.encode(h.S));
+  delete old.data.moved;
+  assert.deepEqual(GameSaves.decode(JSON.stringify(old), h.saveRules).data.moved, {});
+  for (const corrupt of [
+    s => { s.data.moved = { taipei: { inf: 99 } }; },
+    s => { s.data.moved = { taipei: { nope: 1 } }; },
+    s => { s.data.moved = { taipei: { inf: 9 } }; },
+    s => { s.data.moved = { nope: { inf: 1 } }; },
+    s => { s.data.moved = null; },
+  ]) {
+    const bad = structuredClone(JSON.parse(GameSaves.encode(h.S)));
+    corrupt(bad);
+    assert.throws(() => GameSaves.decode(JSON.stringify(bad), h.saveRules));
+  }
+
+  h.S.speed = 99;
+  h.S.moved = { taipei: { inf: 2 } };
+  h.endPlayerTurn();
+  for (let i = 0; i < 40 && h.S.current !== 'taipei'; i++) await f.flush();
+  assert.equal(h.S.current, 'taipei');
+  assert.equal(h.S.day, 2);
+  assert.deepEqual({ ...h.S.moved }, {});
 });
