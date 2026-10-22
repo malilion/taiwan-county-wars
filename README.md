@@ -13,8 +13,8 @@
 
 已用 GitHub Pages 架設，打開瀏覽器就能玩（推送到 `main` 後約 1～2 分鐘自動更新）：
 
-- 台灣縣市大戰：https://malilion.github.io/fight-game/
-- 22 縣市大亂鬥：https://malilion.github.io/fight-game/taiwan-battle-royale.html
+- 台灣縣市大戰：https://malilion.github.io/taiwan-county-wars/
+- 22 縣市大亂鬥：https://malilion.github.io/taiwan-county-wars/taiwan-battle-royale.html
 
 ## 在本機執行
 
