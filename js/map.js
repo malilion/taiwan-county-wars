@@ -118,6 +118,7 @@ function buildMap(svg, onClick, onHover) {
   COUNTIES.forEach(c => {
     const [x, y] = labelPos[c.id];
     const g = svgEl('g', { class: 'ccard', transform: `translate(${x},${y - 22})`, 'data-id': c.id }, cardLayer);
+    svgEl('rect', { x: -20, y: -4, width: 40, height: 56, class: 'chit' }, g); // 透明的抓取範圍，方便從卡片邊緣開始框選
     const tag = svgEl('rect', { x: -16, y: 0, width: 32, height: 7.5, rx: 1.6, class: 'ctag' }, g);
     const name = svgEl('text', { x: 0, y: 5.4, class: 'cname' }, g);
     svgEl('rect', { x: -14.5, y: 8.8, width: 29, height: 29, rx: 1.2, class: 'cgrid' }, g);
