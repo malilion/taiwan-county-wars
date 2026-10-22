@@ -190,17 +190,17 @@
     render();
     await wait(0.9, gen);
     if (gen !== S.gen || S.over) return;
-    let r = Combat.resolve(combatOptions(src, tgt, sent));
+    const options = combatOptions(src, tgt, sent);
+    let r;
     if (watchBattle(fa, fd)) {
       clearArrows();
-      const step = await playBattle({ title: `${byId[tgt].short}攻防戰`, emblem: emblemOf(tgt), canRetreat: fa === S.player,
+      r = await playBattle({ title: `${byId[tgt].short}攻防戰`, emblem: emblemOf(tgt), canRetreat: fa === S.player,
         att: { name: byId[src].short, color: byId[fa].color, mine: fa === S.player },
-        def: { name: byId[tgt].short, color: byId[fd].color, mine: fd === S.player } }, r, gen);
+        def: { name: byId[tgt].short, color: byId[fd].color, mine: fd === S.player } }, options, gen);
       if (gen !== S.gen || S.over) return;
-      if (step !== null) r = Combat.retreat(r, step);
       await finishBattle(r, gen);
       if (gen !== S.gen || S.over) return;
-    }
+    } else r = Combat.resolve(options);
     if (fa === S.player || fd === S.player) S.lastBattle = { src, tgt, fa, fd, sent: count(sent), defenders: count(S.army[tgt]), ...r };
     if (S.buff[src]) delete S.buff[src].atk; // 進攻加成用掉了
     clearArrows();
@@ -316,17 +316,17 @@
     render();
     await wait(0.9, gen);
     if (gen !== S.gen || S.over) return;
-    let r = Combat.resolve(expeditionOptions(src, site, sent));
+    const options = expeditionOptions(src, site, sent);
+    let r;
     if (watchBattle(S.player)) {
       const spec = Invasion.SITES[site];
-      const step = await playBattle({ title: `${spec.name}遠征`, emblem: spec.icon, canRetreat: true,
+      r = await playBattle({ title: `${spec.name}遠征`, emblem: spec.icon, canRetreat: true,
         att: { name: byId[src].short, color: byId[S.player].color, mine: true },
-        def: { name: spec.name, color: '#7b2cbf', mine: false } }, r, gen);
+        def: { name: spec.name, color: '#7b2cbf', mine: false } }, options, gen);
       if (gen !== S.gen || S.over) return;
-      if (step !== null) r = Combat.retreat(r, step);
       await finishBattle(r, gen);
       if (gen !== S.gen || S.over) return;
-    }
+    } else r = Combat.resolve(options);
     S.invasion.sites[site] = r.D;
     if (S.buff[src]) delete S.buff[src].atk;
     // Expeditions return to port instead of occupying an off-map base.
@@ -351,23 +351,24 @@
     if (!Invasion.due(S.invasion, S.day)) return;
     S.invasion.lastRaidDay = S.day;
     const port = pick(Invasion.PORTS);
-    const r = Combat.resolve({ sent: Invasion.wave(S.invasion), defenders: S.army[port], units: S.units,
+    const options = { sent: Invasion.wave(S.invasion), defenders: S.army[port], units: S.units,
       counters: COUNTERS, attackMult: 1.1, defenseMult: defMult(S.player, port),
-      defenderAttack: 1 + 0.12 * S.research[S.player].atk, defenderMoto: byId[port].moto || 1 });
+      defenderAttack: 1 + 0.12 * S.research[S.player].atk, defenderMoto: byId[port].moto || 1 };
+    let r;
     if (watchBattle('invader', S.player)) {
       // 播放期間鎖住操作與自動存檔，空襲結算前不能出兵或存檔
       S.busy = true;
       focusCounty(port);
       render();
-      await playBattle({ title: `${byId[port].short}防空戰`, emblem: emblemOf(port), canRetreat: false,
+      r = await playBattle({ title: `${byId[port].short}防空戰`, emblem: emblemOf(port), canRetreat: false,
         stamps: { win: '防線突破！', hold: '攔截成功！' },
         att: { name: '外星空襲部隊', color: '#7b2cbf', mine: false },
-        def: { name: byId[port].short, color: byId[S.player].color, mine: true } }, r, gen);
+        def: { name: byId[port].short, color: byId[S.player].color, mine: true } }, options, gen);
       if (gen !== S.gen) return;
       await finishBattle(r, gen);
       if (gen !== S.gen) return;
       S.busy = false;
-    }
+    } else r = Combat.resolve(options);
     S.army[port] = r.D;
     const damage = r.win ? 18 : 4;
     S.invasion.shield = Math.max(0, S.invasion.shield - damage);
@@ -395,7 +396,7 @@
       const reason = cleared ? '已摧毀' : !unlocked ? '先清除三座前哨' : site.port && site.port !== port ? `需從${byId[site.port].short}出征` : S.acted.has(port) ? '本港今日已出征' : stunned(port) ? '港口暫時無法出兵' : count(S.army[port]) < 2 ? '港口兵力不足' : '配置部隊';
       return `<div class="invasionSite ${cleared ? 'cleared' : ''}"><div><b>${site.icon} ${site.name}</b><small>${cleared ? '外星據點已清除' : `守軍 ${count(inv.sites[id])} 人`}</small></div><button data-site="${id}" ${expeditionAllowed(port, id) ? '' : 'disabled'}>${reason}</button></div>`;
     }).join('');
-    $('#expeditionResult').textContent = S.lastExpedition ? `${S.lastExpedition.name}：${S.lastExpedition.win ? '摧毀' : '撤回'}，我軍折損 ${S.lastExpedition.lostA}／敵軍折損 ${S.lastExpedition.lostD}` : '先調兵到對應港口，再配置出征部隊；每港每天限一次。';
+    $('#expeditionResult').textContent = S.lastExpedition ? `${S.lastExpedition.name}：${S.lastExpedition.win ? '摧毀' : '未攻下'}，我軍折損 ${S.lastExpedition.lostA}／敵軍折損 ${S.lastExpedition.lostD}` : '先調兵到對應港口，再配置出征部隊；每港每天限一次。';
   }
   $('#focusPortBtn').addEventListener('click', () => {
     if (S.busy || !S.invasion) return;
@@ -761,7 +762,7 @@
     const targetName = expedition ? Invasion.SITES[tgt].name : byId[tgt].short;
     const options = expedition ? expeditionOptions(src, tgt, sent) : combatOptions(src, tgt, sent);
     $('#attackTitle').textContent = `${byId[src].short} → ${targetName}`;
-    $('#attackHint').textContent = expedition ? '每港每日出征一次；作戰後存活部隊返港，前哨守軍戰損保留。' : '每個縣市每日出兵一次；失敗後殘兵撤回，攻陷後駐守新領土。';
+    $('#attackHint').textContent = expedition ? '每港每日出征一次；戰鬥打到一方全滅（可戰略撤退），存活部隊返港，前哨守軍戰損保留。' : '每個縣市每日出兵一次；戰鬥打到一方全滅（可在戰鬥中戰略撤退），攻陷後駐守新領土。';
     $('#attackForces').innerHTML = `<div><small>出征部隊</small><b>${total}<em> 人</em></b><span>本土留守 ${reserve} 人</span></div>
       <span class="versus">VS</span><div><small>${expedition ? '外星' : byId[S.owner[tgt]].short}守軍</small><b>${count(options.defenders)}<em> 人</em></b><span>防禦加成 ×${options.defenseMult.toFixed(2)}</span></div>`;
     $('#attackRows').innerHTML = kinds(S.army[src]).map(k => `<div class="deployRow"><span>${unitIcon(k)} ${esc(U(k).name)}<small>${UNIT_CLASSES[U(k).cls]}・現有 ${S.army[src][k]}</small></span>
@@ -839,7 +840,7 @@
     if (!r) return;
     box.innerHTML = `<h4>最近一場戰役</h4><div class="reportTitle">${byId[r.src].short} → ${byId[r.tgt].short}<b class="${r.win ? 'hl-g' : 'hl-r'}">${r.win ? '攻陷' : r.retreated ? '撤退' : '守住'}</b></div>
       <div class="reportStats"><span>攻方 ${r.sent} → ${count(r.A)} 人<small>折損 ${r.lostA} 人</small></span><span>守方 ${r.defenders} → ${count(r.D)} 人<small>折損 ${r.lostD} 人</small></span></div>
-      <p class="hint">${r.win ? `剩餘攻方部隊進駐${byId[r.tgt].short}。` : r.retreated ? '攻方戰略撤退，殘兵已返回出兵縣市。' : '攻方殘兵已撤回出兵縣市。'}出兵縣市今日行動已使用。</p>`;
+      <p class="hint">${r.win ? `剩餘攻方部隊進駐${byId[r.tgt].short}。` : r.retreated ? '攻方戰略撤退，殘兵已返回出兵縣市。' : '攻方全軍覆沒。'}出兵縣市今日行動已使用。</p>`;
   }
 
   // 透過己方領土（含海路）連通的縣市
@@ -984,48 +985,73 @@
   });
 
   // ───────── 戰鬥畫面：玩家參戰時播放（觀戰或 ⚡ 速度時略過） ─────────
-  // 戰果在播放前就已算好（Combat.resolve 的 rounds），畫面只負責呈現；撤退取播放到的那一合。
-  const BV = { open: false, skip: false, retreat: false, paused: false, fast: 1, step: 0, rounds: [], view: null, wake: null };
+  // 每種兵一排，逐合即時結算，一直打到其中一方全滅；玩家可用 ▲▼ 換自己的排、改變對位，攻方可戰略撤退
+  const BV = { open: false, skip: false, retreat: false, paused: false, fast: 1, step: 0, st: null, opts: null, view: null, side: null, sel: 0, wake: null };
   const watchBattle = (fa, fd) => S.mode === 'play' && S.speed < 99 && (fa === S.player || fd === S.player);
   const emblemOf = id => byId[id].portrait ? `<img src="${byId[id].portrait}" alt="">` : byId[id].short.slice(0, 1);
+  const SHOW_PER_ROW = 8; // 一排最多畫 8 個，其餘用數字表示
   async function battleSleep(ms, gen) {
     await new Promise(r => { BV.wake = r; setTimeout(r, ms / S.speed / BV.fast); });
     BV.wake = null;
     while ((BV.paused || S.menuOpen) && gen === S.gen && !BV.skip && !BV.retreat) await new Promise(r => setTimeout(r, 120));
   }
-  function battleUnits(army, hits, after, round) {
-    const out = [];
-    for (const k of kinds(army)) {
-      const n = army[k], dead = hits ? n - (after[k] || 0) : 0, per = hits?.[k] ? hits[k] / n : 0;
-      for (let j = 0; j < n; j++) {
-        const dying = j >= n - dead, hit = per > 0 && (dying || (j * 7 + round) % 3 === 0);
-        out.push(`<span class="bsUnit${hit ? ' hit' : ''}${dying ? ' dying' : ''}" style="--d:${j % 5 * 70}ms">${unitIcon(k, 'bsSprite')}${hit ? `<em>${Math.max(1, Math.round(per * 10))}</em>` : ''}</span>`);
-      }
+  // 一排（直的）士兵：n = 這合開始時人數，left = 這合結束剩下的人數，dmg = 這排受到的傷害
+  function battleCol(k, n, left, dmg, round) {
+    if (!k || !n) return '<div class="bsColUnits"></div>';
+    const shown = Math.min(n, SHOW_PER_ROW), dead = Math.min(shown, n - left), out = [];
+    for (let j = 0; j < shown; j++) {
+      const dying = j >= shown - dead, hit = dmg > 0 && (dying || (j * 7 + round) % 3 === 0);
+      out.push(`<span class="bsUnit${hit ? ' hit' : ''}${dying ? ' dying' : ''}" style="--d:${j % 5 * 70}ms">${unitIcon(k, 'bsSprite')}</span>`);
     }
-    return out.join('') || '<span class="bsEmpty">空城</span>';
+    return `<div class="bsColUnits">${out.join('')}</div><span class="bsCount">${esc(U(k).name)}<br>×${left}</span>`
+      + (dmg > 0 ? `<em class="bsDmg">${Math.max(1, Math.round(dmg))}</em>` : '');
   }
   // pos = left／right（版面位置）；role = att／def（攻守）
   const bsSide = (pos, role, side, now, start) => `<div class="bsSide ${pos}" style="--c:${side.color}">
     <span class="bsName">${role === 'att' ? '⚔️ 攻方' : '🛡️ 守方'}・${esc(side.name)}${side.mine ? '<small>（你）</small>' : ''}</span>
     <span class="bsBar"><i style="width:${count(start) ? count(now) / count(start) * 100 : 0}%"></i></span>
     <b>${count(now)}<small> / ${count(start)} 人</small></b></div>`;
-  // i = 播放到第幾合（0 = 對峙）；final = 實際戰果（含撤退）
-  // 玩家的部隊固定在左邊：玩家守城時左右對調，城牆（虛線）永遠在守方前面
-  function drawBattle(i, final = null) {
-    const { rounds, view } = BV, start = rounds[0];
-    const shown = final || rounds[Math.max(0, i - 1)], after = final || rounds[i], clash = !final && i > 0;
-    const total = rounds.length - 1, flip = view.def.mine && !view.att.mine;
-    const att = { role: 'att', side: view.att, now: after.A, start: start.A, units: battleUnits(shown.A, clash ? after.toA : null, after.A, i) };
-    const def = { role: 'def', side: view.def, now: after.D, start: start.D, units: battleUnits(shown.D, clash ? after.toD : null, after.D, i + 1) };
-    const [left, right] = flip ? [def, att] : [att, def];
-    $('#bsTimer').innerHTML = `⏳ <b>${final ? '結算' : i ? `第 ${i} 合` : '對峙'}</b><small>${final ? '' : ` / ${total} 合`}</small>`;
-    $('#bsSides').innerHTML = bsSide('left', left.role, left.side, left.now, left.start) + '<span class="bsVs">VS</span>' + bsSide('right', right.role, right.side, right.now, right.start);
-    $('#bsField').className = 'bsField' + (clash ? ' clash' : '') + (flip ? ' flip' : '');
-    const gap = `<div class="bsGap">${clash ? '<i>⚡</i><i>⚡</i><i>⚡</i>' : ''}</div>`, wall = `<div class="bsWall" style="--c:${view.def.color}"></div>`;
-    $('#bsField').innerHTML = `<div class="bsArmy left">${left.units}</div>${flip ? wall + gap : gap + wall}<div class="bsArmy right">${right.units}</div>`;
+  // 對位提示：我方這排打對面有利／不利
+  function matchup(mine, foe) {
+    if (!mine || !foe) return '';
+    const a = U(mine).cls, b = U(foe).cls;
+    return COUNTERS[a] === b ? '<b class="bsAdv">剋</b>' : COUNTERS[b] === a ? '<b class="bsDis">被剋</b>' : '';
   }
-  async function playBattle(view, result, gen) {
-    Object.assign(BV, { open: true, skip: false, retreat: false, paused: false, step: 0, rounds: result.rounds, view });
+  // i = 第幾合（0 = 對峙）；final = 實際戰果；still = 換排後重畫，不播動畫
+  // 每種兵站成直的一排，第 1 排緊貼城牆；我方第 N 排打敵方第 N 排，所有排同時交戰
+  // 玩家的部隊固定在左邊：玩家守城時左右對調，城牆（虛線）永遠在守方前面
+  function drawBattle(i, final = null, still = false) {
+    const { st, view } = BV, rounds = st.rounds, start = rounds[0];
+    const clash = !final && !still && i > 0;
+    const before = final || (clash ? rounds[i - 1] : rounds[i]), after = final || rounds[i];
+    const flip = view.def.mine && !view.att.mine;
+    const att = { role: 'att', side: view.att, key: 'A', lanes: st.laneA, dmg: clash ? after.toA : {} };
+    const def = { role: 'def', side: view.def, key: 'D', lanes: st.laneD, dmg: clash ? after.toD : {} };
+    const [left, right] = flip ? [def, att] : [att, def];
+    const mine = left.side.mine && !final && !st.done;
+    $('#bsTimer').innerHTML = `⏳ <b>${final ? '結算' : i ? `第 ${i} 合` : '對峙'}</b>`;
+    $('#bsSides').innerHTML = bsSide('left', left.role, left.side, after[left.key], start[left.key]) + '<span class="bsVs">VS</span>'
+      + bsSide('right', right.role, right.side, after[right.key], start[right.key]);
+    $('#bsField').className = 'bsField' + (clash ? ' clash' : '') + (flip ? ' flip' : '');
+    const cols = (side, round, isLeft) => side.lanes.map((k, lane) => {
+      const foe = (isLeft ? right : left).lanes[lane];
+      const alive = (after[side.key][k] || 0) > 0 && (after[(isLeft ? right : left).key][foe] || 0) > 0;
+      const badge = isLeft && !final && alive ? matchup(k, foe) : '';
+      return `<div class="bsCol${isLeft && mine && lane === BV.sel ? ' sel' : ''}" data-lane="${isLeft ? lane : ''}">
+        <span class="bsColHead">第 ${lane + 1} 排${badge}</span>
+        ${battleCol(k, before[side.key][k] || 0, after[side.key][k] || 0, side.dmg[k] || 0, round)}</div>`;
+    }).join('');
+    const gap = `<div class="bsGap">${clash ? '<i>⚡</i><i>⚡</i><i>⚡</i>' : ''}</div>`, wall = `<div class="bsWall" style="--c:${view.def.color}"></div>`;
+    $('#bsField').innerHTML = `<div class="bsCols left">${cols(left, i, true)}</div>${flip ? wall + gap : gap + wall}<div class="bsCols right">${cols(right, i + 1, false)}</div>`;
+    $('#bsMove').hidden = !mine;
+    $('#bsFwd').disabled = BV.sel <= 0;
+    $('#bsBack').disabled = BV.sel >= st.laneA.length - 1;
+  }
+  // 逐合即時結算，回傳戰果（撤退時取當下兵力）；遊戲被換掉則回傳 null
+  async function playBattle(view, options, gen) {
+    const st = Combat.setup(options);
+    Object.assign(BV, { open: true, skip: false, retreat: false, paused: false, step: 0, st, opts: options, view,
+      side: view.att.mine ? 'A' : view.def.mine ? 'D' : null, sel: 0 });
     $('#bsTitle').textContent = view.title;
     $('#bsEmblem').innerHTML = view.emblem;
     $('#bsEmblem').style.background = view.def.color;
@@ -1039,13 +1065,16 @@
     renderBattleCtrls();
     drawBattle(0);
     $('#bsSkip').focus();
-    await battleSleep(900, gen);
-    for (let i = 1; i < result.rounds.length && !BV.skip && !BV.retreat && gen === S.gen; i++) {
-      BV.step = i;
-      drawBattle(i);
-      await battleSleep(800, gen);
+    await battleSleep(1400, gen);
+    while (!st.done && !BV.retreat && gen === S.gen) {
+      if (BV.skip) { while (!st.done) Combat.step(st, options); break; }
+      Combat.step(st, options);
+      BV.step = st.round;
+      drawBattle(st.round);
+      await battleSleep(1100, gen);
     }
-    return BV.retreat ? BV.step : null;
+    if (gen !== S.gen) return null;
+    return Combat.finish(st, BV.retreat && !st.done);
   }
   async function finishBattle(r, gen) {
     drawBattle(null, r);
@@ -1072,12 +1101,30 @@
     $('#bsPause').setAttribute('aria-label', BV.paused ? '繼續戰鬥' : '暫停戰鬥');
     $('#bsFast').textContent = `⏩ ${BV.fast}x`;
   }
+  // 換排：把選取的我方那一排往前（靠城牆，delta = -1）或往後移，和相鄰那排對調
+  function moveRow(delta) {
+    const { st } = BV;
+    if (!BV.open || !BV.side || !st || st.done) return false;
+    const to = BV.sel + delta;
+    if (!Combat.swap(st, BV.side, BV.sel, to)) return false;
+    BV.sel = to;
+    drawBattle(BV.step, null, true);
+    return true;
+  }
+  function selectRow(lane) {
+    if (!BV.open || !BV.side || BV.st.done || !(lane >= 0 && lane < BV.st.laneA.length)) return;
+    BV.sel = lane;
+    drawBattle(BV.step, null, true);
+  }
   function skipBattle() { BV.skip = true; BV.wake?.(); }
   function toggleBattlePause() { BV.paused = !BV.paused; renderBattleCtrls(); }
   $('#bsSkip').addEventListener('click', skipBattle);
   $('#bsDone').addEventListener('click', skipBattle);
   $('#bsPause').addEventListener('click', toggleBattlePause);
   $('#bsFast').addEventListener('click', () => { BV.fast = BV.fast >= 4 ? 1 : BV.fast * 2; renderBattleCtrls(); });
+  $('#bsFwd').addEventListener('click', () => moveRow(-1));
+  $('#bsBack').addEventListener('click', () => moveRow(1));
+  $('#bsField').addEventListener('click', e => { const lane = e.target.closest?.('[data-lane]'); if (lane) selectRow(Number(lane.dataset.lane)); });
   $('#bsRetreat').addEventListener('click', () => {
     if (!BV.open || !BV.view?.canRetreat || $('#bsRetreat').disabled) return;
     BV.retreat = true;
@@ -1609,6 +1656,7 @@
     if (e.key === 'Escape' && !$('#attackDialog').hidden) { $('#attackCancel').click(); return; }
     if (BV.open) {
       if (e.key === 'Escape') skipBattle();
+      if (e.key === 'ArrowLeft' || e.key === 'ArrowRight') { e.preventDefault(); moveRow(e.key === 'ArrowRight' ? -1 : 1); } // 我方在左：→ 往前
       if (e.key === ' ' && e.target.tagName !== 'BUTTON') { e.preventDefault(); toggleBattlePause(); }
       return;
     }
