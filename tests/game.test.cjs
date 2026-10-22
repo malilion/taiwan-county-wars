@@ -606,6 +606,10 @@ test('air raids play on the battle screen with the player defending and apply on
   assert.equal(get('#battleScreen').hidden, false);
   assert.equal(get('#bsRetreat').hidden, true, 'defenders cannot retreat');
   assert.match(get('#bsTitle').textContent, /防空戰/);
+  const sides = get('#bsSides').innerHTML;
+  assert.ok(sides.indexOf('（你）') < sides.indexOf('外星空襲部隊'), 'the player stays on the left');
+  assert.match(get('#bsField').className, /flip/);
+  assert.ok(get('#bsField').innerHTML.indexOf('bsWall') < get('#bsField').innerHTML.indexOf('bsGap'), 'wall in front of the defender');
   assert.equal(h.S.busy, true, 'no orders or autosaves mid-raid');
   assert.equal(h.S.invasion.shield, 100, 'damage lands after the playback');
   await f.flush(); await raid;
