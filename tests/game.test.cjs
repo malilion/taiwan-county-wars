@@ -44,7 +44,7 @@ function fixture() {
   }`, context);
   let source = fs.readFileSync('js/game.js', 'utf8');
   const at = source.lastIndexOf('})();');
-  source = source.slice(0, at) + `Object.assign(harness, { S, initState, runLoop, endPlayerTurn, doAttack, saveCheckpoint, loadCheckpoint, saveRules, render, buildFacility, produceBuildings, income, defMult, openAttack, showStart, newGame, recruit, confirmTransfer, checkEnd, startInvasion, doExpedition, invasionRaid, expeditionAllowed, borderThreat, setPosture, atkMult, aiTurn });` + source.slice(at);
+  source = source.slice(0, at) + `Object.assign(harness, { S, initState, runLoop, endPlayerTurn, doAttack, saveCheckpoint, loadCheckpoint, saveRules, render, buildFacility, produceBuildings, income, defMult, openAttack, showStart, newGame, recruit, confirmTransfer, checkEnd, startInvasion, doExpedition, invasionRaid, expeditionAllowed, borderThreat, setPosture, atkMult, aiTurn, BV });` + source.slice(at);
   vm.runInContext(source, context);
   const h = context.harness;
   h.initState('play', 'taipei');
@@ -417,4 +417,71 @@ test('postures survive saving while old checkpoint postures default to balanced'
   saved.data.posture = Object.fromEntries(Object.keys(h.S.owner).map(id => [id, 'balanced']));
   saved.data.posture.taipei = 'invincible';
   assert.throws(() => GameSaves.decode(JSON.stringify(saved), h.saveRules));
+});
+
+// Advance fake timers until the battle screen reaches the requested clash.
+async function untilStep(f, step) {
+  for (let i = 0; i < 200 && !(f.h.BV.open && f.h.BV.step >= step); i++) { if (f.timers.length) f.timers.shift()(); await Promise.resolve(); }
+  assert.ok(f.h.BV.open && f.h.BV.step >= step, 'battle screen should be playing');
+}
+test('combat rounds start from the line-up, end at the result and support retreat at any clash', () => {
+  const r = Combat.resolve(options({ inf: 12, moto: 3 }, { gen: 14 }), () => 0.5);
+  assert.deepEqual(r.rounds[0].A, { inf: 12, moto: 3 }); assert.deepEqual(r.rounds[0].D, { gen: 14 });
+  assert.deepEqual(r.rounds.at(-1).A, r.A); assert.deepEqual(r.rounds.at(-1).D, r.D);
+  const early = Combat.retreat(r, 0);
+  assert.equal(early.lostA + early.lostD, 0); assert.equal(early.win, false); assert.ok(early.retreated);
+  const mid = Combat.retreat(r, 1);
+  assert.equal(Combat.count(mid.A) + mid.lostA, 15); assert.equal(Combat.count(mid.D) + mid.lostD, 14);
+});
+test('player battles open the battle screen and close it after the result', async () => {
+  const f = fixture(), { h, get } = f;
+  h.S.army.taipei = { inf: 10 }; h.S.army.newtaipei = { inf: 2 };
+  const battle = h.doAttack('taipei', 'newtaipei', h.S.gen, false, { inf: 9 });
+  await untilStep(f, 0);
+  assert.equal(get('#battleScreen').hidden, false);
+  assert.equal(get('#bsRetreat').hidden, false, 'the attacking player may retreat');
+  await f.flush(); await battle;
+  assert.equal(get('#battleScreen').hidden, true); assert.equal(h.BV.open, false);
+});
+test('strategic retreat keeps that clash\'s survivors, spares the target and uses the action', async () => {
+  const f = fixture(), { h, get } = f;
+  h.S.army.taipei = { inf: 21 }; h.S.army.newtaipei = { gen: 20 };
+  const battle = h.doAttack('taipei', 'newtaipei', h.S.gen, false, { inf: 20 });
+  await untilStep(f, 1);
+  get('#bsRetreat').handlers.click();
+  await f.flush(); await battle;
+  const r = h.S.lastBattle;
+  assert.ok(r.retreated); assert.equal(r.win, false);
+  assert.deepEqual(r.A, r.rounds[1].A); assert.deepEqual(r.D, r.rounds[1].D);
+  assert.equal(h.S.owner.newtaipei, 'newtaipei');
+  assert.equal(Combat.count(h.S.army.taipei), 1 + Combat.count(r.A));
+  assert.equal(Combat.count(h.S.army.newtaipei), Combat.count(r.D));
+  assert.ok(h.S.acted.has('taipei'));
+});
+test('defending players watch without a retreat button; lightning speed and AI-only battles skip the screen', async () => {
+  const f = fixture(), { h, get } = f;
+  h.S.current = 'newtaipei'; h.S.army.newtaipei = { inf: 10 }; h.S.army.taipei = { inf: 5 };
+  const defend = h.doAttack('newtaipei', 'taipei', h.S.gen, false, { inf: 4 });
+  await untilStep(f, 0);
+  assert.equal(get('#bsRetreat').hidden, true);
+  await f.flush(); await defend;
+  h.BV.step = 0; h.S.army.yilan = { inf: 6 }; h.S.army.hualien = { inf: 2 }; h.S.current = 'yilan';
+  const aiOnly = h.doAttack('yilan', 'hualien', h.S.gen, false, { inf: 5 });
+  await f.flush(); await aiOnly;
+  assert.equal(h.BV.step, 0, 'AI-only battle did not play');
+  h.S.speed = 99; h.S.current = 'taipei'; h.S.acted.clear();
+  h.S.army.taipei = { inf: 5 }; h.S.army.newtaipei = {};
+  const fast = h.doAttack('taipei', 'newtaipei', h.S.gen, false, { inf: 2 });
+  await f.flush(); await fast;
+  assert.equal(h.BV.step, 0); assert.equal(get('#battleScreen').hidden, true);
+});
+test('replacing the game mid-playback leaves the new game untouched', async () => {
+  const f = fixture(), { h } = f;
+  h.S.army.taipei = { inf: 21 }; h.S.army.newtaipei = { gen: 20 };
+  const old = h.doAttack('taipei', 'newtaipei', h.S.gen, false, { inf: 20 });
+  await untilStep(f, 1);
+  ++h.S.gen; h.initState('play', 'tainan');
+  const before = JSON.stringify({ owner: h.S.owner, army: h.S.army });
+  await f.flush(); await old;
+  assert.equal(JSON.stringify({ owner: h.S.owner, army: h.S.army }), before);
 });
