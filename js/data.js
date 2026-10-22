@@ -65,7 +65,20 @@ const UNITS = {
   gen: { name: '八家將', icon: '👺', sprite: 'assets/units/gen-chibi.png', cost: 26, atk: 7, hp: 7, cls: 'gen', desc: '廟口精銳，壓制阿兵哥' },
   art: { name: '砲兵', icon: '💣', sprite: 'assets/units/art-chibi.png', cost: 34, atk: 11, hp: 3, cls: 'art', desc: '火力最強，但怕被近身' },
 };
+// 精銳沿用重甲相剋，不新增第五種兵系。
+UNITS.elite = { name: '護台神將', icon: 'assets/units/icons/03-hero.webp', sprite: 'assets/units/icons/03-hero.webp', cost: 100, atk: 16, hp: 22, cls: 'gen', desc: '召喚陣每 15 天產生一名；軍事與城防 Lv.5 解鎖招募' };
 const UNIT_KEYS = ['inf', 'moto', 'gen', 'art'];
+const POSTURES = {
+  balanced: { name: '均衡', icon: '⚖️', atk: 1, def: 1, desc: '攻守維持原本能力' },
+  guard: { name: '固守', icon: '🛡️', atk: 0.85, def: 1.25, desc: '防禦 +25%，進攻 -15%' },
+  assault: { name: '強攻', icon: '⚔️', atk: 1.15, def: 0.85, desc: '進攻 +15%，防禦 -15%' },
+};
+const BUILDINGS = {
+  market: { name: '地方市集', icon: '🏪', cost: 120, desc: '本縣基本稅收 +15 萬，再受經濟研發加成', income: 15 },
+  barracks: { name: '義勇兵營', icon: '🏕️', cost: 150, desc: '每 3 天補充 1 名阿兵哥；滿員時延後', period: 3, unit: 'inf' },
+  fort: { name: '防禦要塞', icon: '🏯', cost: 180, desc: '本縣防禦 ×1.2，可疊加研發與地域技能', defense: 1.2 },
+  summon: { name: '神將召喚陣', icon: '🔮', cost: 350, desc: '每 15 天召喚 1 名護台神將；需軍事、城防 Lv.5', period: 15, unit: 'elite', elite: true },
+};
 const COUNTERS = { moto: 'art', art: 'gen', gen: 'inf', inf: 'moto' };
 
 // 開局兵力
@@ -171,3 +184,4 @@ const COMMON_SKILLS = {
   c_market: { name: '夜市補給', icon: '🍢', type: 'atk', value: 1.25, cd: 3, desc: '吃飽再出發，本縣下一次進攻攻擊 ×1.25' },
 };
 const ALL_SKILLS = { ...REGION_SKILLS, ...COMMON_SKILLS };
+

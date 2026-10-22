@@ -229,6 +229,50 @@ main { flex: 1; display: flex; min-height: 0; }
   display: flex; align-items: center; justify-content: center; padding: 16px;
 }
 .overlay[hidden] { display: none; }
+.ctrls { flex-wrap: wrap; }
+#saveStatus { display: block; color: var(--muted); font-size: 11px; margin: 5px 0 12px; }
+.campaignGoal { display: flex; justify-content: space-between; padding: 8px 0; border-top: 1px solid var(--line); color: var(--accent); font-size: 12px; }
+.saveChoices { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.saveChoices button { text-align: left; border-color: #315f71; }
+.saveHint { font-size: 12px; color: var(--muted); line-height: 1.6; }
+.attackDialog { width: min(600px, 100%); }
+.eyebrow { color: var(--accent); font-size: 11px; letter-spacing: 2px; text-align: center; margin: 0 0 12px; }
+.attackDialog h2 { font-size: 28px; }
+.attackForces { display: grid; grid-template-columns: 1fr auto 1fr; align-items: center; gap: 12px; padding: 20px 12px; margin-bottom: 16px; border: 1px solid var(--line); background: linear-gradient(120deg, #183750, #231e39); border-radius: 12px; text-align: center; }
+.attackForces small, .attackForces span { display: block; color: var(--muted); font-size: 12px; }
+.attackForces b { display: block; font-size: 38px; color: var(--accent); line-height: 1.5; }
+.attackForces em { font-size: 13px; font-weight: normal; font-style: normal; color: var(--text); }
+.attackForces .versus { font-size: 14px; font-weight: 900; }
+.attackPresets { display: flex; gap: 6px; margin-bottom: 8px; }
+.attackPresets button { flex: 1; font-size: 12px; padding: 8px; }
+.deployRow { display: flex; justify-content: space-between; align-items: center; gap: 8px; padding: 10px 0; border-bottom: 1px solid var(--line); }
+.deployRow > span { min-width: 0; overflow-wrap: anywhere; }
+.deployRow small { display: block; color: var(--muted); font-size: 11px; margin-top: 3px; }
+.deployControl { display: flex; flex-shrink: 0; align-items: center; gap: 10px; }
+.deployControl button { width: 36px; height: 36px; padding: 0; }
+.deployControl b { min-width: 16px; text-align: center; }
+.attackEstimate { background: #0e1b30; border-radius: 10px; padding: 14px; margin-top: 16px; }
+.estimateTop { display: flex; align-items: center; justify-content: space-between; font-size: 13px; }
+.estimateTop b { font-size: 28px; }
+.estimateBar { height: 6px; border-radius: 5px; background: var(--line); overflow: hidden; margin-top: 8px; }
+.estimateBar i { display: block; height: 100%; background: var(--accent); }
+.attackEstimate p { font-size: 13px; margin-bottom: 6px; }
+.attackEstimate small { display: block; color: var(--muted); line-height: 1.6; font-size: 11px; }
+.reportTitle { display: flex; justify-content: space-between; align-items: center; font-weight: bold; }
+.reportStats { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 10px; font-size: 13px; }
+.reportStats span { background: var(--bg); padding: 10px; border-radius: 8px; }
+.reportStats small { display: block; color: var(--muted); margin-top: 4px; }
+.hl-g { color: var(--green); }
+button:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
+@media (max-width: 480px) {
+  #top { gap: 8px; padding: 10px; }
+  #top h1 { font-size: 19px; }
+  .ctrls { gap: 5px; }
+  .ctrls > button { font-size: 12px; padding: 6px 8px; }
+  .dialog { padding: 16px; }
+  .saveChoices { grid-template-columns: 1fr; gap: 0; }
+  .attackDialog h2 { font-size: 24px; }
+}
 .designDialog h2 { font-size: 26px; }
 .dzRow { display: flex; align-items: flex-start; gap: 10px; margin: 10px 0; }
 .dzLabel { width: 40px; flex-shrink: 0; font-weight: 700; padding-top: 6px; }
@@ -341,3 +385,49 @@ main { flex: 1; display: flex; min-height: 0; }
 .recruitHead { display: flex; justify-content: space-between; align-items: baseline; margin-top: 12px; font-size: 14px; }
 .recruitHead span { color: var(--muted); font-size: 13px; }
 .recruitHead span b { color: var(--accent); font-size: 16px; }
+
+
+.facility, .facilityPicker { margin: 12px 0; padding: 12px; border: 1px solid #3b5275; border-radius: 10px; background: #0f1c32; }
+.facility { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.facility b, .facilityPicker summary { font-size: 13px; color: var(--accent); }
+.facility small, .facilityPicker small { display: block; color: var(--muted); font-size: 11px; line-height: 1.6; margin-top: 4px; }
+.facilityTimer { display: block; color: var(--green); font-size: 12px; margin-top: 6px; }
+.facilityPicker summary { cursor: pointer; }
+.facilityPicker button { width: 100%; text-align: left; margin-top: 8px; padding: 10px; }
+.facilityPicker button b { font-size: 12px; }
+
+/* Post-unification campaign */
+#invasionPanel { border-color: #875fc0; background: linear-gradient(150deg, #251b3d, #13213b 70%); }
+.invasionHead { display: flex; justify-content: space-between; align-items: center; }
+.invasionHead h3 { margin: 0; font-size: 18px; }
+.invasionHead b { color: var(--green); font-size: 26px; }
+.invasionTrack { height: 8px; border-radius: 8px; overflow: hidden; background: var(--bg); margin-top: 12px; }
+.invasionTrack i { display: block; height: 100%; background: linear-gradient(90deg, #a987ed, #06d6a0); transition: width .3s; }
+.portPicker { display: flex; align-items: center; gap: 10px; font-size: 13px; margin: 12px 0; }
+.portPicker select { flex: 1; min-width: 0; font: inherit; color: var(--text); background: var(--panel2); border: 1px solid var(--line); border-radius: 8px; padding: 8px; }
+.invasionSite { display: flex; align-items: center; justify-content: space-between; gap: 6px; padding: 10px 0; border-top: 1px solid var(--line); }
+.invasionSite b { font-size: 13px; }
+.invasionSite small { display: block; color: var(--muted); font-size: 11px; margin-top: 4px; }
+.invasionSite button { font-size: 11px; padding: 8px; }
+.invasionSite.cleared b { color: var(--green); }
+
+.portInfo { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 10px; color: var(--muted); font-size: 11px; }
+.portInfo button { font-size: 11px; }
+
+.deploymentTotal { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; font-size: 13px; margin-bottom: 12px; }
+.deploymentTotal small { flex-basis: 100%; color: var(--muted); font-size: 11px; }
+.deploymentTotal input, .unitAmount { font: inherit; color: var(--text); text-align: center; background: var(--bg); border: 1px solid var(--line); border-radius: 6px; padding: 7px; width: 70px; }
+.unitAmount { width: 52px; padding: 6px 2px; }
+.attackPresets { flex-wrap: wrap; }
+.attackPresets button { flex: 1 0 25%; }
+.reserveWarning { padding: 10px; border-radius: 8px; background: #183746; color: #a9d5dc; font-size: 12px; line-height: 1.7; }
+.reserveWarning.danger { background: #402433; color: #ffadc0; border: 1px solid #834159; }
+.defenseBox { padding: 12px; margin-top: 12px; border: 1px solid var(--line); border-radius: 10px; }
+.defenseHead { display: flex; align-items: center; justify-content: space-between; gap: 8px; font-size: 12px; }
+.defenseBox p { margin: 6px 0; font-size: 12px; }
+.defenseBox small { display: block; color: var(--muted); font-size: 11px; line-height: 1.7; margin-top: 6px; }
+.postures { display: flex; gap: 6px; margin-top: 10px; }
+.postures button { flex: 1; padding: 7px 4px; font-size: 12px; }
+.postures button.on { border-color: var(--accent); color: var(--accent); }
+.risk-high { color: #ff8fa8; } .risk-mid { color: var(--accent); } .risk-low, .risk-none { color: var(--green); }
+@media (max-width: 480px) { .deployControl { gap: 4px; } .deployRow { font-size: 13px; } }
