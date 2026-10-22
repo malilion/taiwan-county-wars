@@ -6,7 +6,7 @@
   <title>台灣縣市大戰</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@400;700;900&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="style.css?v=20261021d">
+  <link rel="stylesheet" href="style.css?v=20261022c">
 </head>
 <body>
   <header id="top">
@@ -17,7 +17,8 @@
         <button data-s="1" class="on">1x</button><button data-s="2">2x</button><button data-s="4">4x</button><button data-s="99">⚡</button>
       </div>
       <button id="pauseBtn">⏸ 暫停</button>
-      <button id="newBtn">新遊戲</button>
+      <button id="saveBtn" disabled>💾 存檔</button>
+      <button id="newBtn">選單</button>
     </div>
   </header>
 
@@ -37,10 +38,23 @@
       <div id="mePanel" class="card" hidden>
         <div class="mehead"><span id="meName"></span><span id="meCounties"></span></div>
         <div class="money"><span>💰 <b id="meMoney"></b></span><span id="meIncome"></span></div>
+        <small id="saveStatus" role="status">回合中自動儲存</small>
+        <div class="campaignGoal"><span id="campaignGoalName">🏁 統一全台</span><span id="campaignGoalProgress">0 / 22 縣市</span></div>
         <div id="research"></div>
         <button id="designBtn" class="designBtn">🛠️ 組建兵種 <small id="designCount"></small></button>
         <button id="endTurn" class="primary">結束回合 ▶</button>
       </div>
+      <div id="invasionPanel" class="card" hidden>
+        <p class="eyebrow">FINAL CAMPAIGN ／ 台灣守衛戰</p>
+        <div class="invasionHead"><h3>👾 外星入侵</h3><b id="invasionShield">100%</b></div>
+        <div class="invasionTrack" role="img" aria-label="全台防線狀態"><i id="invasionMeter"></i></div>
+        <p id="invasionStatus" class="hint" aria-live="polite"></p>
+        <label class="portPicker">出征港口 <select id="invasionPort"><option value="keelung">基隆</option><option value="kaohsiung">高雄</option><option value="hualien">花蓮</option></select></label>
+        <div class="portInfo"><span id="invasionPortInfo"></span><button id="focusPortBtn">前往港口招兵／調兵</button></div>
+        <div id="invasionSites"></div>
+        <p id="expeditionResult" class="hint" aria-live="polite"></p>
+      </div>
+      <div id="battleReport" class="card" hidden aria-live="polite"></div>
       <div id="info" class="card"></div>
       <div class="card">
         <h4 id="boardTitle">勢力排行</h4>
@@ -62,30 +76,51 @@
         <h2>台灣縣市大戰</h2>
         <p class="tag">22 縣市，只能留下一個。</p>
         <div class="diffRow"><span>難度</span><div id="diffPick" class="seg"></div><small id="diffDesc"></small></div>
+        <div class="saveChoices"><button id="autoLoad" class="wide" disabled>尚無可用自動存檔</button><button id="manualLoad" class="wide" disabled>尚無可用手動存檔</button></div>
+        <button id="returnGame" class="primary wide" hidden>返回目前遊戲</button>
+        <p class="saveHint">進度保存在此瀏覽器，僅支援本頁策略模式。選擇縣市將開始新局。</p>
         <h3>🎮 選擇你的縣市出征</h3>
         <div id="pickGrid"></div>
+        <p class="saveHint">🏗️ 每縣可建 1 座設施：市集增稅、兵營補兵、要塞守城；軍事與城防 Lv.5 解鎖每 15 天產出精銳的召喚陣。</p>
         <button id="watchAll" class="primary wide">👀 觀戰模式：看 22 縣市 AI 大亂鬥</button>
         <details class="rules">
           <summary>遊戲規則</summary>
           <ul>
             <li>每天輪到你時會收到稅收（萬元），控制整個地區（北、中、南、東、離島）有額外加成。</li>
-            <li>點選自己的縣市可以<b>招兵</b>（每個縣市最多 25 人）；每個縣市每天可以<b>出兵一次</b>，點相鄰敵方縣市進攻。</li>
+            <li>點選自己的縣市可以<b>招兵</b>（每個縣市最多 25 人）；每個縣市每天可以<b>出兵一次</b>，點相鄰敵方縣市後，配置兵力並確認出征（至少留 1 人守家）。</li>
             <li>按「🚚 調兵」可以把部隊分配到任何<b>相連的己方縣市</b>，自選兵種與人數，不限次數。</li>
             <li>兵種相剋：🛵 機車 剋 💣 砲兵 剋 👺 八家將 剋 🪖 阿兵哥 剋 🛵 機車。</li>
             <li>每個縣市都有專屬的<b>固有技能（不能更換）</b>。你的老家和<b>每個佔領的縣市都多一個自訂技能欄</b>：從技能庫（通用技能＋老家＋所有佔領過的縣市技能）挑選裝上。</li>
             <li>按「🛠️ 組建兵種」可以自己搭配武器＋防具＋坐騎，打造專屬部隊（最多 4 種）。</li>
             <li>每個縣市有特性（例如苗栗國防禦 +25%）；研發可以永久提升攻擊、防禦或稅收。</li>
             <li>簡單／普通難度開局有和平期，AI 不會主動開戰，可以先專心併吞鄰近縣市。</li>
-            <li>離島靠海上航線連接（虛線）。消滅所有其他縣市即可統一全台！</li>
+            <li>離島靠海上航線連接（虛線）。消滅所有其他縣市即可統一全台！勝利後可選擇挑戰外星入侵，清除三座前哨並摧毀母艦。</li>
           </ul>
         </details>
       </div>
       <div id="endView" hidden>
         <h2 id="endTitle"></h2>
         <p id="endText"></p>
+        <button id="invasionBtn" class="primary wide" hidden>👾 挑戰外星入侵</button>
         <button id="againBtn" class="primary wide">再來一局</button>
         <button id="watchBtn" class="wide">繼續觀戰</button>
       </div>
+    </div>
+  </div>
+
+  <div id="attackDialog" class="overlay" hidden role="dialog" aria-modal="true" aria-labelledby="attackTitle">
+    <div class="dialog attackDialog">
+      <p class="eyebrow">TACTICAL BRIEFING ／ 出征準備</p>
+      <h2 id="attackTitle"></h2>
+      <p class="tag">先看戰況，再決定派誰上場</p>
+      <div id="attackForces" class="attackForces"></div>
+      <label class="deploymentTotal">總出征人數 <input id="deploymentSize" type="number" min="0" step="1" value="0"><small>自動按現有兵種比例分配，可再逐兵種調整</small></label>
+      <div id="attackPresets" class="attackPresets"><button data-plan="5">5 人</button><button data-plan="10">10 人</button><button data-plan="15">15 人</button><button data-plan="all">主力出征</button><button data-plan="half">一半兵力</button><button data-plan="none">清空重配</button></div>
+      <div id="attackRows"></div>
+      <p id="reserveWarning" class="reserveWarning" aria-live="polite"></p>
+      <div id="attackEstimate" class="attackEstimate" aria-live="polite"></div>
+      <p id="attackHint" class="hint">每個縣市每日出兵一次；失敗後殘兵撤回，攻陷後駐守新領土。</p>
+      <div class="dzBtns"><button id="attackCancel">取消</button><button id="attackConfirm" class="primary">確認出征</button></div>
     </div>
   </div>
 
@@ -129,8 +164,12 @@
   </div>
 
   <script src="https://cdn.jsdelivr.net/npm/d3-delaunay@6.0.4/dist/d3-delaunay.min.js"></script>
-  <script src="js/data.js?v=20261021d"></script>
-  <script src="js/map.js?v=20261021d"></script>
-  <script src="js/game.js?v=20261021d"></script>
+  <script src="js/data.js?v=20261022c"></script>
+  <script src="js/map.js?v=20261022c"></script>
+  <script src="js/combat.js?v=20261022c"></script>
+  <script src="js/invasion.js?v=20261022c"></script>
+  <script src="js/saves.js?v=20261022c"></script>
+  <script src="js/game.js?v=20261022c"></script>
 </body>
 </html>
+
