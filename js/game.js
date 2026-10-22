@@ -87,6 +87,7 @@
   function newGame(mode, player) {
     S.gen++;
     closeActionDialogs();
+    closeBattle();
     clearArrows();
     initState(mode, player);
     S.gameDiffKey = mode === 'play' ? S.diffKey : 'hard';
@@ -185,7 +186,17 @@
     render();
     await wait(0.9, gen);
     if (gen !== S.gen || S.over) return;
-    const r = Combat.resolve(combatOptions(src, tgt, sent));
+    let r = Combat.resolve(combatOptions(src, tgt, sent));
+    if (watchBattle(fa, fd)) {
+      clearArrows();
+      const step = await playBattle({ title: `${byId[tgt].short}攻防戰`, emblem: emblemOf(tgt), canRetreat: fa === S.player,
+        att: { name: byId[src].short, color: byId[fa].color, mine: fa === S.player },
+        def: { name: byId[tgt].short, color: byId[fd].color, mine: fd === S.player } }, r, gen);
+      if (gen !== S.gen || S.over) return;
+      if (step !== null) r = Combat.retreat(r, step);
+      await finishBattle(r, gen);
+      if (gen !== S.gen || S.over) return;
+    }
     if (fa === S.player || fd === S.player) S.lastBattle = { src, tgt, fa, fd, sent: count(sent), defenders: count(S.army[tgt]), ...r };
     if (S.buff[src]) delete S.buff[src].atk; // 進攻加成用掉了
     clearArrows();
@@ -206,8 +217,9 @@
     } else {
       S.army[tgt] = r.D;
       for (const k of kinds(r.A)) addUnits(S.army[src], k, r.A[k]); // 殘兵撤回
-      popText(tgt, '守住！', '#8ecae6');
-      log(`🛡️ ${cTag(tgt)} 擋下 ${fTag(fa)} 的進攻（攻方損 ${r.lostA}、守方損 ${r.lostD}）`, fd === S.player ? 'me' : '');
+      popText(tgt, r.retreated ? '撤退' : '守住！', '#8ecae6');
+      log(r.retreated ? `🏳️ ${fTag(fa)} 從 ${cTag(tgt)} 戰略撤退，殘兵返回 ${cTag(src)}（攻方損 ${r.lostA}、守方損 ${r.lostD}）`
+        : `🛡️ ${cTag(tgt)} 擋下 ${fTag(fa)} 的進攻（攻方損 ${r.lostA}、守方損 ${r.lostD}）`, fd === S.player || fa === S.player ? 'me' : '');
     }
     render();
     checkEnd();
@@ -265,6 +277,7 @@
     if (S.mode !== 'play' || !S.over || owned(S.player).length !== COUNTIES.length || S.invasion) return;
     ++S.gen; // Invalidate the final county battle's pending animation/continuation.
     closeActionDialogs();
+    closeBattle();
     clearArrows();
     S.invasion = Invasion.create(S.day, S.gameDiffKey || S.diffKey);
     S.over = S.busy = false;
@@ -296,7 +309,17 @@
     render();
     await wait(0.9, gen);
     if (gen !== S.gen || S.over) return;
-    const r = Combat.resolve(expeditionOptions(src, site, sent));
+    let r = Combat.resolve(expeditionOptions(src, site, sent));
+    if (watchBattle(S.player)) {
+      const spec = Invasion.SITES[site];
+      const step = await playBattle({ title: `${spec.name}遠征`, emblem: spec.icon, canRetreat: true,
+        att: { name: byId[src].short, color: byId[S.player].color, mine: true },
+        def: { name: spec.name, color: '#7b2cbf', mine: false } }, r, gen);
+      if (gen !== S.gen || S.over) return;
+      if (step !== null) r = Combat.retreat(r, step);
+      await finishBattle(r, gen);
+      if (gen !== S.gen || S.over) return;
+    }
     S.invasion.sites[site] = r.D;
     if (S.buff[src]) delete S.buff[src].atk;
     // Expeditions return to port instead of occupying an off-map base.
@@ -306,7 +329,7 @@
       S.money[S.player] += 120;
       S.invasion.shield = Math.min(100, S.invasion.shield + 10);
     }
-    log(`${r.win ? '🏆' : '🛸'} ${cTag(src)} 出征${Invasion.SITES[site].name}：${r.win ? '摧毀成功，補給 +120 萬、防線 +10' : '未能攻陷，守軍損耗保留'}。我軍折損 ${r.lostA} 人，敵軍折損 ${r.lostD} 人；${count(r.A)} 人返港。`, 'me');
+    log(`${r.win ? '🏆' : '🛸'} ${cTag(src)} 出征${Invasion.SITES[site].name}：${r.win ? '摧毀成功，補給 +120 萬、防線 +10' : r.retreated ? '戰略撤退，守軍損耗保留' : '未能攻陷，守軍損耗保留'}。我軍折損 ${r.lostA} 人，敵軍折損 ${r.lostD} 人；${count(r.A)} 人返港。`, 'me');
     S.lastExpedition = { name: Invasion.SITES[site].name, win: r.win, lostA: r.lostA, lostD: r.lostD };
     S.busy = false;
     S.sel = src;
@@ -786,9 +809,9 @@
     const box = $('#battleReport'), r = S.lastBattle;
     box.hidden = !r;
     if (!r) return;
-    box.innerHTML = `<h4>最近一場戰役</h4><div class="reportTitle">${byId[r.src].short} → ${byId[r.tgt].short}<b class="${r.win ? 'hl-g' : 'hl-r'}">${r.win ? '攻陷' : '守住'}</b></div>
+    box.innerHTML = `<h4>最近一場戰役</h4><div class="reportTitle">${byId[r.src].short} → ${byId[r.tgt].short}<b class="${r.win ? 'hl-g' : 'hl-r'}">${r.win ? '攻陷' : r.retreated ? '撤退' : '守住'}</b></div>
       <div class="reportStats"><span>攻方 ${r.sent} → ${count(r.A)} 人<small>折損 ${r.lostA} 人</small></span><span>守方 ${r.defenders} → ${count(r.D)} 人<small>折損 ${r.lostD} 人</small></span></div>
-      <p class="hint">${r.win ? `剩餘攻方部隊進駐${byId[r.tgt].short}。` : '攻方殘兵已撤回出兵縣市。'}出兵縣市今日行動已使用。</p>`;
+      <p class="hint">${r.win ? `剩餘攻方部隊進駐${byId[r.tgt].short}。` : r.retreated ? '攻方戰略撤退，殘兵已返回出兵縣市。' : '攻方殘兵已撤回出兵縣市。'}出兵縣市今日行動已使用。</p>`;
   }
 
   // 透過己方領土（含海路）連通的縣市
@@ -930,6 +953,103 @@
     S.draft.name = e.target.value;
     const spec = designUnit(S.draft.weapon, S.draft.armor, S.draft.mount);
     $('#dzPreview h3').firstChild.textContent = (S.draft.name.trim() || defaultUnitName(spec)) + ' ';
+  });
+
+  // ───────── 戰鬥畫面：玩家參戰時播放（觀戰或 ⚡ 速度時略過） ─────────
+  // 戰果在播放前就已算好（Combat.resolve 的 rounds），畫面只負責呈現；撤退取播放到的那一合。
+  const BV = { open: false, skip: false, retreat: false, paused: false, fast: 1, step: 0, rounds: [], view: null, wake: null };
+  const watchBattle = (fa, fd) => S.mode === 'play' && S.speed < 99 && (fa === S.player || fd === S.player);
+  const emblemOf = id => byId[id].portrait ? `<img src="${byId[id].portrait}" alt="">` : byId[id].short.slice(0, 1);
+  async function battleSleep(ms, gen) {
+    await new Promise(r => { BV.wake = r; setTimeout(r, ms / S.speed / BV.fast); });
+    BV.wake = null;
+    while ((BV.paused || S.menuOpen) && gen === S.gen && !BV.skip && !BV.retreat) await new Promise(r => setTimeout(r, 120));
+  }
+  function battleUnits(army, hits, after, round) {
+    const out = [];
+    for (const k of kinds(army)) {
+      const n = army[k], dead = hits ? n - (after[k] || 0) : 0, per = hits?.[k] ? hits[k] / n : 0;
+      for (let j = 0; j < n; j++) {
+        const dying = j >= n - dead, hit = per > 0 && (dying || (j * 7 + round) % 3 === 0);
+        out.push(`<span class="bsUnit${hit ? ' hit' : ''}${dying ? ' dying' : ''}" style="--d:${j % 5 * 70}ms">${unitIcon(k, 'bsSprite')}${hit ? `<em>${Math.max(1, Math.round(per * 10))}</em>` : ''}</span>`);
+      }
+    }
+    return out.join('') || '<span class="bsEmpty">空城</span>';
+  }
+  const bsSide = (cls, side, now, start) => `<div class="bsSide ${cls}" style="--c:${side.color}">
+    <span class="bsName">${cls === 'att' ? '⚔️ 攻方' : '🛡️ 守方'}・${esc(side.name)}${side.mine ? '<small>（你）</small>' : ''}</span>
+    <span class="bsBar"><i style="width:${count(start) ? count(now) / count(start) * 100 : 0}%"></i></span>
+    <b>${count(now)}<small> / ${count(start)} 人</small></b></div>`;
+  // i = 播放到第幾合（0 = 對峙）；final = 實際戰果（含撤退）
+  function drawBattle(i, final = null) {
+    const { rounds, view } = BV, start = rounds[0];
+    const shown = final || rounds[Math.max(0, i - 1)], after = final || rounds[i], clash = !final && i > 0;
+    const total = rounds.length - 1;
+    $('#bsTimer').innerHTML = `⏳ <b>${final ? '結算' : i ? `第 ${i} 合` : '對峙'}</b><small>${final ? '' : ` / ${total} 合`}</small>`;
+    $('#bsSides').innerHTML = bsSide('att', view.att, after.A, start.A) + '<span class="bsVs">VS</span>' + bsSide('def', view.def, after.D, start.D);
+    $('#bsField').className = 'bsField' + (clash ? ' clash' : '');
+    $('#bsField').innerHTML = `<div class="bsArmy att">${battleUnits(shown.A, clash ? after.toA : null, after.A, i)}</div>
+      <div class="bsGap">${clash ? '<i>⚡</i><i>⚡</i><i>⚡</i>' : ''}</div><div class="bsWall" style="--c:${view.def.color}"></div>
+      <div class="bsArmy def">${battleUnits(shown.D, clash ? after.toD : null, after.D, i + 1)}</div>`;
+  }
+  async function playBattle(view, result, gen) {
+    Object.assign(BV, { open: true, skip: false, retreat: false, paused: false, step: 0, rounds: result.rounds, view });
+    $('#bsTitle').textContent = view.title;
+    $('#bsEmblem').innerHTML = view.emblem;
+    $('#bsEmblem').style.background = view.def.color;
+    $('#bsRetreat').hidden = !view.canRetreat;
+    $('#bsRetreat').disabled = false;
+    $('#bsSkip').disabled = false;
+    $('#bsDone').hidden = true;
+    $('#bsStamp').hidden = true;
+    $('#tip').hidden = true;
+    $('#battleScreen').hidden = false;
+    renderBattleCtrls();
+    drawBattle(0);
+    $('#bsSkip').focus();
+    await battleSleep(900, gen);
+    for (let i = 1; i < result.rounds.length && !BV.skip && !BV.retreat && gen === S.gen; i++) {
+      BV.step = i;
+      drawBattle(i);
+      await battleSleep(800, gen);
+    }
+    return BV.retreat ? BV.step : null;
+  }
+  async function finishBattle(r, gen) {
+    drawBattle(null, r);
+    const [text, cls] = r.retreated ? ['戰略撤退', 'retreat'] : r.win ? ['攻陷！', 'win'] : ['守住！', 'hold'];
+    $('#bsStamp').className = `bsStamp ${cls}`;
+    $('#bsStamp').innerHTML = `<b>${text}</b><small>攻方折損 ${r.lostA} 人・守方折損 ${r.lostD} 人</small>`;
+    $('#bsStamp').hidden = false;
+    $('#bsSkip').disabled = true;
+    $('#bsRetreat').hidden = true;
+    $('#bsDone').hidden = false;
+    $('#bsDone').focus();
+    Object.assign(BV, { skip: false, retreat: false });
+    await battleSleep(2400, gen);
+    if (gen === S.gen) closeBattle();
+  }
+  function closeBattle() {
+    Object.assign(BV, { open: false, skip: true });
+    BV.wake?.();
+    $('#battleScreen').hidden = true;
+  }
+  function renderBattleCtrls() {
+    $('#bsPause').textContent = BV.paused ? '▶' : '⏸';
+    $('#bsPause').setAttribute('aria-label', BV.paused ? '繼續戰鬥' : '暫停戰鬥');
+    $('#bsFast').textContent = `⏩ ${BV.fast}x`;
+  }
+  function skipBattle() { BV.skip = true; BV.wake?.(); }
+  function toggleBattlePause() { BV.paused = !BV.paused; renderBattleCtrls(); }
+  $('#bsSkip').addEventListener('click', skipBattle);
+  $('#bsDone').addEventListener('click', skipBattle);
+  $('#bsPause').addEventListener('click', toggleBattlePause);
+  $('#bsFast').addEventListener('click', () => { BV.fast = BV.fast >= 4 ? 1 : BV.fast * 2; renderBattleCtrls(); });
+  $('#bsRetreat').addEventListener('click', () => {
+    if (!BV.open || !BV.view?.canRetreat || $('#bsRetreat').disabled) return;
+    BV.retreat = true;
+    $('#bsRetreat').disabled = true;
+    BV.wake?.();
   });
 
   // ───────── 特效 ─────────
@@ -1219,6 +1339,7 @@
       const save = GameSaves.read(localStorage, slot, saveRules);
       ++S.gen;
       closeActionDialogs();
+      closeBattle();
       Object.assign(S, save.data, { diff: DIFFICULTY[save.data.diffKey], gameDiffKey: save.data.diffKey, over: false, busy: false, paused: false, transferMode: false, hover: null, lastBattle: null, lastExpedition: null, expeditionPort: null });
       lastAuto = '';
       $('#log').replaceChildren();
@@ -1290,6 +1411,11 @@
       else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first.focus(); }
     }
     if (e.key === 'Escape' && !$('#attackDialog').hidden) { $('#attackCancel').click(); return; }
+    if (BV.open) {
+      if (e.key === 'Escape') skipBattle();
+      if (e.key === ' ' && e.target.tagName !== 'BUTTON') { e.preventDefault(); toggleBattlePause(); }
+      return;
+    }
     if (!$('#attackDialog').hidden || !$('#modal').hidden || !$('#designer').hidden || !$('#transfer').hidden || !$('#skillPicker').hidden || e.target.tagName === 'INPUT') return;
     if (e.key === 'Enter' || e.key === 'e') endPlayerTurn();
     if (e.key === 'Escape') { S.sel = null; S.transferMode = false; render(); }
