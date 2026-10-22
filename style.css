@@ -456,10 +456,10 @@ button:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
 .bsTimer small { color: #c8d3ff; }
 .bsSides { display: flex; align-items: center; gap: 10px; padding: 6px 12px; background: #0b1fa8; color: #fff; }
 .bsSide { flex: 1; min-width: 0; display: grid; grid-template-columns: 1fr auto; gap: 2px 10px; align-items: center; }
-.bsSide.def { text-align: right; }
-.bsSide.def .bsName { order: 2; }
-.bsSide.def b { order: 1; }
-.bsSide.def .bsBar { order: 3; direction: rtl; }
+.bsSide.right { text-align: right; }
+.bsSide.right .bsName { order: 2; }
+.bsSide.right b { order: 1; }
+.bsSide.right .bsBar { order: 3; direction: rtl; }
 .bsName { font-weight: 700; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .bsName small { color: #ffd166; }
 .bsSide b { font-size: 20px; }
@@ -479,8 +479,8 @@ button:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
     #d4a02a;
 }
 .bsArmy { display: grid; grid-template-rows: repeat(5, auto); grid-auto-flow: column; gap: 4px; align-content: center; }
-.bsArmy.att { justify-content: start; direction: rtl; } /* rtl: start = 靠近前線 */
-.bsArmy.def { justify-content: start; }
+.bsArmy.left { justify-content: start; direction: rtl; } /* rtl: start = 靠近前線 */
+.bsArmy.right { justify-content: start; }
 .bsUnit {
   position: relative; width: clamp(28px, 6vw, 46px); height: clamp(28px, 6vw, 46px);
   display: grid; place-items: center; font-size: clamp(18px, 4vw, 30px); direction: ltr;
@@ -493,15 +493,16 @@ button:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
   animation: bs-dmg .8s ease-out both; animation-delay: calc(var(--d) + .25s); pointer-events: none;
 }
 .bsEmpty { color: #6b4a1e; font-weight: 700; }
-.clash .att .bsUnit { animation: bs-lunge-r .5s ease-in-out var(--d) both; }
-.clash .def .bsUnit { animation: bs-lunge-l .5s ease-in-out var(--d) both; }
+.clash .left .bsUnit { animation: bs-lunge-r .5s ease-in-out var(--d) both; }
+.clash .right .bsUnit { animation: bs-lunge-l .5s ease-in-out var(--d) both; }
 .clash .bsUnit.hit .bsSprite, .clash .bsUnit.hit > :not(em) { animation: bs-hit .45s steps(2) calc(var(--d) + .25s) 2; }
-.clash .att .bsUnit.dying { animation: bs-lunge-r .5s ease-in-out var(--d), bs-die .5s ease-in calc(var(--d) + .55s) forwards; }
-.clash .def .bsUnit.dying { animation: bs-lunge-l .5s ease-in-out var(--d), bs-die .5s ease-in calc(var(--d) + .55s) forwards; }
+.clash .left .bsUnit.dying { animation: bs-lunge-r .5s ease-in-out var(--d), bs-die .5s ease-in calc(var(--d) + .55s) forwards; }
+.clash .right .bsUnit.dying { animation: bs-lunge-l .5s ease-in-out var(--d), bs-die .5s ease-in calc(var(--d) + .55s) forwards; }
 .bsGap { display: grid; justify-items: center; gap: 18px; font-size: 26px; }
 .bsGap i { font-style: normal; animation: bs-bolt .6s ease-out both; }
 .bsGap i:nth-child(2) { animation-delay: .15s; }
 .bsGap i:nth-child(3) { animation-delay: .3s; }
+.bsField.flip { grid-template-columns: 1fr 10px 56px 1fr; }
 .bsWall { align-self: stretch; border-left: 3px dashed #fff; opacity: .85; }
 .bsStamp {
   position: absolute; inset: 0; display: grid; place-content: center; justify-items: center; gap: 6px;
@@ -530,6 +531,7 @@ button:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
 @media (max-width: 600px) {
   .battleScreen { padding: 8px; }
   .bsField { grid-template-columns: 1fr 26px 6px 1fr; padding: 12px 4px; gap: 3px; }
+  .bsField.flip { grid-template-columns: 1fr 6px 26px 1fr; }
   .bsArmy { gap: 2px; }
   .bsGap { font-size: 18px; }
   .bsSides { flex-wrap: wrap; }

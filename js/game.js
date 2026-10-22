@@ -1004,21 +1004,25 @@
     }
     return out.join('') || '<span class="bsEmpty">空城</span>';
   }
-  const bsSide = (cls, side, now, start) => `<div class="bsSide ${cls}" style="--c:${side.color}">
-    <span class="bsName">${cls === 'att' ? '⚔️ 攻方' : '🛡️ 守方'}・${esc(side.name)}${side.mine ? '<small>（你）</small>' : ''}</span>
+  // pos = left／right（版面位置）；role = att／def（攻守）
+  const bsSide = (pos, role, side, now, start) => `<div class="bsSide ${pos}" style="--c:${side.color}">
+    <span class="bsName">${role === 'att' ? '⚔️ 攻方' : '🛡️ 守方'}・${esc(side.name)}${side.mine ? '<small>（你）</small>' : ''}</span>
     <span class="bsBar"><i style="width:${count(start) ? count(now) / count(start) * 100 : 0}%"></i></span>
     <b>${count(now)}<small> / ${count(start)} 人</small></b></div>`;
   // i = 播放到第幾合（0 = 對峙）；final = 實際戰果（含撤退）
+  // 玩家的部隊固定在左邊：玩家守城時左右對調，城牆（虛線）永遠在守方前面
   function drawBattle(i, final = null) {
     const { rounds, view } = BV, start = rounds[0];
     const shown = final || rounds[Math.max(0, i - 1)], after = final || rounds[i], clash = !final && i > 0;
-    const total = rounds.length - 1;
+    const total = rounds.length - 1, flip = view.def.mine && !view.att.mine;
+    const att = { role: 'att', side: view.att, now: after.A, start: start.A, units: battleUnits(shown.A, clash ? after.toA : null, after.A, i) };
+    const def = { role: 'def', side: view.def, now: after.D, start: start.D, units: battleUnits(shown.D, clash ? after.toD : null, after.D, i + 1) };
+    const [left, right] = flip ? [def, att] : [att, def];
     $('#bsTimer').innerHTML = `⏳ <b>${final ? '結算' : i ? `第 ${i} 合` : '對峙'}</b><small>${final ? '' : ` / ${total} 合`}</small>`;
-    $('#bsSides').innerHTML = bsSide('att', view.att, after.A, start.A) + '<span class="bsVs">VS</span>' + bsSide('def', view.def, after.D, start.D);
-    $('#bsField').className = 'bsField' + (clash ? ' clash' : '');
-    $('#bsField').innerHTML = `<div class="bsArmy att">${battleUnits(shown.A, clash ? after.toA : null, after.A, i)}</div>
-      <div class="bsGap">${clash ? '<i>⚡</i><i>⚡</i><i>⚡</i>' : ''}</div><div class="bsWall" style="--c:${view.def.color}"></div>
-      <div class="bsArmy def">${battleUnits(shown.D, clash ? after.toD : null, after.D, i + 1)}</div>`;
+    $('#bsSides').innerHTML = bsSide('left', left.role, left.side, left.now, left.start) + '<span class="bsVs">VS</span>' + bsSide('right', right.role, right.side, right.now, right.start);
+    $('#bsField').className = 'bsField' + (clash ? ' clash' : '') + (flip ? ' flip' : '');
+    const gap = `<div class="bsGap">${clash ? '<i>⚡</i><i>⚡</i><i>⚡</i>' : ''}</div>`, wall = `<div class="bsWall" style="--c:${view.def.color}"></div>`;
+    $('#bsField').innerHTML = `<div class="bsArmy left">${left.units}</div>${flip ? wall + gap : gap + wall}<div class="bsArmy right">${right.units}</div>`;
   }
   async function playBattle(view, result, gen) {
     Object.assign(BV, { open: true, skip: false, retreat: false, paused: false, step: 0, rounds: result.rounds, view });
