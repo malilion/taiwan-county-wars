@@ -32,10 +32,11 @@ const Combat = (() => {
   }
 
   // ── 排兵對陣：每種兵一排，每一排打對面那一排；對面空了就打最近的一排 ──
-  // 戰鬥一直打到其中一方全滅（攻方可由玩家主動戰略撤退）。
+  // 打到其中一方全滅，或打滿 TIME_LIMIT 合（時間到而雙方都還有人，守方守住）。攻方可戰略撤退。
   const CLASS_ORDER = ['inf', 'moto', 'gen', 'art'];
   const byClass = units => (a, b) => CLASS_ORDER.indexOf(units[a].cls) - CLASS_ORDER.indexOf(units[b].cls) || a.localeCompare(b);
-  const MAX_ROUNDS = 200; // 安全上限，正常戰鬥遠低於此
+  const TIME_LIMIT = 12; // 沙漏：打滿這麼多合仍未分出勝負，守方守住
+  const MAX_ROUNDS = 200; // 再往上的安全上限
   // 把 army 的每一排排到它剋制的敵排對面（最強的排先挑）
   function counterLanes(army, foe, units, counters) {
     const L = Math.max(kinds(army).length, foe.length), lanes = Array(L).fill(null);
@@ -60,7 +61,9 @@ const Combat = (() => {
     while (laneD.length < laneA.length) laneD.push(null);
     // aimA／aimD：{ 我方兵種: 指定攻擊的敵方兵種 }（玩家可直接指定打對方任一排，例如最後一排）
     return { A, D, a0: count(A), d0: count(D), laneA, laneD, aimA: {}, aimD: {}, adapted: 0, round: 0,
-      rounds: [{ A: { ...A }, D: { ...D }, toA: {}, toD: {} }], done: !count(A) || !count(D) };
+      rounds: [{ A: { ...A }, D: { ...D }, toA: {}, toD: {} }], done: !count(A) || !count(D),
+      base: { A: { ...A }, D: { ...D } }, tacticUsed: {},
+      buff: { A: { deal: 0, take: 0 }, D: { deal: 0, take: 0 } }, silence: { A: 0, D: 0 } };
   }
   // 第 i 排的攻擊目標：對面那排，沒有就找最近的（同距離取上面那排）
   function targetLane(lanes, army, i) {
@@ -87,15 +90,67 @@ const Combat = (() => {
       army[k] -= Math.min(kills, army[k]);
     }
   }
+  // 倍率 1 時原樣返回，沒有戰術的戰鬥和以前的傷害數字相同。
+  function scaleDamage(amounts, mult) {
+    if (mult === 1) return amounts;
+    const out = {};
+    for (const k of Object.keys(amounts)) out[k] = amounts[k] * mult;
+    return out;
+  }
+  const charge = n => n > 0 ? n - 1 : 0;
+  // 戰術（名稱見 data.js TACTICS）。每邊每場一次，沒有用就不影響結算。
+  // fire：接下來 3 合我方傷害 ×1.5；wall：接下來 3 合我方受傷 ×0.5；
+  // smoke：敵方下一合傷害 0；heal：復活本戰各兵種已損失的 30%（無條件捨去，至少 1），不超過開戰人數。
+  function healSide(st, side) {
+    const army = st[side], base = st.base[side];
+    for (const k of Object.keys(base)) {
+      const began = base[k] || 0, lost = began - (army[k] || 0);
+      if (lost <= 0) continue;
+      army[k] = Math.min(began, (army[k] || 0) + Math.max(1, Math.floor(lost * 3 / 10)));
+    }
+    const snap = st.rounds[st.round];
+    if (snap) snap[side] = { ...army };
+  }
+  function useTactic(st, side, key) {
+    if (!st || st.done || (side !== 'A' && side !== 'D')) return false;
+    if (!st.tacticUsed) st.tacticUsed = {};
+    if (st.tacticUsed[side]) return false;
+    if (!st.buff) st.buff = { A: { deal: 0, take: 0 }, D: { deal: 0, take: 0 } };
+    if (!st.silence) st.silence = { A: 0, D: 0 };
+    if (!st.base) st.base = { A: { ...(st.rounds?.[0]?.A || {}) }, D: { ...(st.rounds?.[0]?.D || {}) } };
+    if (key === 'fire') st.buff[side].deal = 3;
+    else if (key === 'wall') st.buff[side].take = 3;
+    else if (key === 'smoke') st.silence[side === 'A' ? 'D' : 'A'] = 1;
+    else if (key === 'heal') healSide(st, side);
+    else return false;
+    st.tacticUsed[side] = key;
+    return true;
+  }
+  // 守方 AI：兵力第一次低於開戰的一半時，城防 Lv.1 用沙包牆，否則鞭炮突擊。
+  function aiTactic(st, research) {
+    if (!st || st.done || st.tacticUsed?.D || !count(st.D)) return null;
+    if (!(st.d0 > 0) || count(st.D) * 2 >= st.d0) return null;
+    const key = (research?.def || 0) >= 1 ? 'wall' : 'fire';
+    return useTactic(st, 'D', key) ? key : null;
+  }
   function step(st, o, random = Math.random) {
     if (st.done) return st;
-    const toD = laneDamage(o, st.A, st.laneA, st.aimA, st.D, st.laneD, o.attackMult / o.defenseMult, o.attackerMoto ?? 1, random);
-    const toA = laneDamage(o, st.D, st.laneD, st.aimD, st.A, st.laneA, o.defenderAttack, o.defenderMoto ?? 1, random);
+    let toD = laneDamage(o, st.A, st.laneA, st.aimA, st.D, st.laneD, o.attackMult / o.defenseMult, o.attackerMoto ?? 1, random);
+    let toA = laneDamage(o, st.D, st.laneD, st.aimD, st.A, st.laneA, o.defenderAttack, o.defenderMoto ?? 1, random);
+    if (st.buff && st.silence) {
+      const dealA = st.buff.A.deal > 0 ? 1.5 : 1, dealD = st.buff.D.deal > 0 ? 1.5 : 1;
+      const takeA = st.buff.A.take > 0 ? 0.5 : 1, takeD = st.buff.D.take > 0 ? 0.5 : 1;
+      toD = scaleDamage(toD, (st.silence.A > 0 ? 0 : 1) * dealA * takeD);
+      toA = scaleDamage(toA, (st.silence.D > 0 ? 0 : 1) * dealD * takeA);
+      st.buff.A.deal = charge(st.buff.A.deal); st.buff.A.take = charge(st.buff.A.take);
+      st.buff.D.deal = charge(st.buff.D.deal); st.buff.D.take = charge(st.buff.D.take);
+      st.silence.A = charge(st.silence.A); st.silence.D = charge(st.silence.D);
+    }
     applyDamage(st.D, toD, o.units, random);
     applyDamage(st.A, toA, o.units, random);
     st.round++;
     st.rounds.push({ A: { ...st.A }, D: { ...st.D }, toA, toD });
-    st.done = !count(st.A) || !count(st.D) || st.round >= MAX_ROUNDS;
+    st.done = !count(st.A) || !count(st.D) || st.round >= TIME_LIMIT || st.round >= MAX_ROUNDS;
     // AI 那一方每打完一合，照對手目前的排法重新排成剋制位置（o.adapt：'A'、'D'、'AD' 或 ''，預設守方）
     // 打完才反應，所以玩家換排後至少有一合是用新排法打
     if (!st.done) for (const side of o.adapt ?? 'D') {
@@ -123,8 +178,10 @@ const Combat = (() => {
     return true;
   }
   function finish(st, retreated = false) {
-    const win = !retreated && count(st.D) === 0 && count(st.A) > 0;
-    return { A: { ...st.A }, D: { ...st.D }, win, retreated, rounds: st.rounds,
+    const aliveA = count(st.A) > 0, aliveD = count(st.D) > 0;
+    const timeout = !retreated && aliveA && aliveD && (st.round >= TIME_LIMIT || st.round >= MAX_ROUNDS);
+    const win = !retreated && !aliveD && aliveA;
+    return { A: { ...st.A }, D: { ...st.D }, win, retreated, timeout, rounds: st.rounds,
       lostA: st.a0 - count(st.A), lostD: st.d0 - count(st.D) };
   }
   function resolve(options, random = Math.random) {
@@ -145,6 +202,6 @@ const Combat = (() => {
     }
     return { chance: Math.round(wins / trials * 100), lostA: Math.round(lostA / trials), lostD: Math.round(lostD / trials) };
   }
-  return { plan, planSize, validDeployment, setup, step, swap, aim, finish, resolve, estimate, count };
+  return { plan, planSize, validDeployment, setup, step, swap, aim, finish, resolve, estimate, count, useTactic, aiTactic, TIME_LIMIT };
 })();
 if (typeof module !== 'undefined') module.exports = Combat;

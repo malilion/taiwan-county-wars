@@ -6,7 +6,7 @@
   <title>台灣縣市大戰</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@400;700;900&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="style.css?v=20261023a">
+  <link rel="stylesheet" href="style.css?v=20261023b">
 </head>
 <body>
   <header id="top">
@@ -124,7 +124,7 @@
       <div id="attackRows"></div>
       <p id="reserveWarning" class="reserveWarning" aria-live="polite"></p>
       <div id="attackEstimate" class="attackEstimate" aria-live="polite"></div>
-      <p id="attackHint" class="hint">每個縣市每日出兵一次；戰鬥打到一方全滅（可在戰鬥中戰略撤退），攻陷後駐守新領土。</p>
+      <p id="attackHint" class="hint">每個縣市每日出兵一次；最多 12 合，時間到而守軍仍在則守住（可在戰鬥中戰略撤退，也可使用一次戰術），攻陷後駐守新領土。</p>
       <div class="dzBtns"><button id="attackCancel">取消</button><button id="attackConfirm" class="primary">確認出征</button></div>
     </div>
   </div>
@@ -139,11 +139,16 @@
       <div id="bsSides" class="bsSides"></div>
       <div class="bsStage">
         <div id="bsField" class="bsField"></div>
+        <div id="bsFloat" class="bsFloat" hidden aria-live="polite"></div>
         <div id="bsStamp" class="bsStamp" hidden role="status"></div>
       </div>
       <footer class="bsFoot">
         <div class="bsCtrl">
           <button id="bsPause" aria-label="暫停戰鬥">⏸</button><button id="bsFast" aria-label="切換戰鬥速度">⏩ 1x</button><button id="bsSkip">⏭ 略過</button>
+        </div>
+        <div id="bsTacticWrap" class="bsTacticWrap" hidden>
+          <button id="bsTacticBtn" aria-haspopup="menu" aria-expanded="false">🎴 戰術</button>
+          <div id="bsTacticMenu" class="bsTacticMenu" hidden role="menu"></div>
         </div>
         <div id="bsMove" class="bsMove" hidden>
           <button id="bsBack" aria-label="選取的排往後移">◀ 往後</button><button id="bsFwd" aria-label="選取的排往前移">往前 ▶</button>
@@ -195,12 +200,12 @@
   </div>
 
   <script src="https://cdn.jsdelivr.net/npm/d3-delaunay@6.0.4/dist/d3-delaunay.min.js"></script>
-  <script src="js/data.js?v=20261022m"></script>
+  <script src="js/data.js?v=20261023b"></script>
   <script src="js/map.js?v=20261022m"></script>
-  <script src="js/combat.js?v=20261022m"></script>
+  <script src="js/combat.js?v=20261023b"></script>
   <script src="js/invasion.js?v=20261022m"></script>
   <script src="js/saves.js?v=20261022m"></script>
-  <script src="js/game.js?v=20261022m"></script>
+  <script src="js/game.js?v=20261023b"></script>
 </body>
 </html>
 
