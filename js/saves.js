@@ -1,7 +1,7 @@
 // Versioned local checkpoints; loading returns fresh data, never DOM/HTML.
 const GameSaves = (() => {
   const PREFIX = 'taiwan-war:v1:';
-  const FIELDS = ['mode', 'player', 'diffKey', 'day', 'turnIdx', 'current', 'sel', 'sendHalf', 'owner', 'army', 'money', 'research', 'aggr', 'units', 'unitSeq', 'skillReady', 'buff', 'stun', 'order', 'slots', 'buildings', 'invasion', 'posture', 'moved'];
+  const FIELDS = ['mode', 'player', 'diffKey', 'day', 'turnIdx', 'current', 'sel', 'sendHalf', 'owner', 'army', 'money', 'research', 'aggr', 'units', 'unitSeq', 'skillReady', 'buff', 'stun', 'order', 'slots', 'buildings', 'invasion', 'posture', 'moved', 'playerStarted'];
   const integer = (n, max = 1000000000) => Number.isInteger(n) && n >= 0 && n <= max;
   const record = v => v && typeof v === 'object' && !Array.isArray(v) && Object.keys(v).every(k => !['__proto__', 'constructor', 'prototype'].includes(k));
   function encode(state, logs = []) {
@@ -48,6 +48,7 @@ const GameSaves = (() => {
         || !Number.isFinite(s.aggr[id]) || s.aggr[id] < 1 || s.aggr[id] > 2) throw new Error('縣市數值損毀');
     }
     if (s.moved === undefined) s.moved = {}; // 舊版 v1 存檔沒有部隊行動紀錄
+    if (typeof s.playerStarted !== 'boolean') s.playerStarted = true; // 舊版沒有開局旗標，視為玩家已經行動過
     if (!record(s.moved)) throw new Error('調動紀錄損毀');
     for (const [id, troops] of Object.entries(s.moved)) {
       if (!hasId(id) || !record(troops)) throw new Error('調動紀錄損毀');
