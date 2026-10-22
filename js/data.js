@@ -176,12 +176,19 @@ const REGION_SKILLS = {
   lienchiang: { name: '藍眼淚幻術', icon: '✨', type: 'stun', cd: 5, desc: '相鄰敵方縣市看藍眼淚看呆了，到明天都無法出兵' },
 };
 
-// 通用技能：一開始就在技能庫，可以裝到任何技能欄
+// 自訂技能：每個縣市除了固有技能，還有 1 個自訂技能欄，從這 10 種裡選一個
+// 設定後鎖定，直到縣市易主（被佔領或重新佔領）才能重新設定
 const COMMON_SKILLS = {
   c_build: { name: '地方建設', icon: '🏗️', type: 'money', value: 60, cd: 3, desc: '蓋了一座新的運動中心，進帳 60 萬' },
   c_draft: { name: '替代役徵召', icon: '🪖', type: 'recruit', unit: 'inf', value: 3, cd: 3, desc: '免費徵召 3 名阿兵哥' },
   c_guard: { name: '全民防衛', icon: '🛡️', type: 'def', value: 1.3, cd: 3, desc: '鄉親一起守家園，本縣防禦 ×1.3 到明天' },
   c_market: { name: '夜市補給', icon: '🍢', type: 'atk', value: 1.25, cd: 3, desc: '吃飽再出發，本縣下一次進攻攻擊 ×1.25' },
+  c_temple: { name: '廟會陣頭', icon: '🏮', type: 'recruit', unit: 'gen', value: 2, cd: 4, desc: '陣頭出巡，免費徵召 2 名八家將' },
+  c_supply: { name: '國軍撥補', icon: '📦', type: 'recruit', unit: 'art', value: 1, cd: 4, desc: '國防部撥下 1 名砲兵' },
+  c_leak: { name: '爆料公社', icon: '📰', type: 'strike', value: 0.2, cd: 4, desc: '媒體爆料，最強的相鄰敵方縣市流失 20% 兵力' },
+  c_typhoon: { name: '颱風假', icon: '🌀', type: 'storm', value: 0.15, cd: 5, desc: '宣布放颱風假，所有相鄰敵方縣市各少 15% 兵力' },
+  c_jam: { name: '交通管制', icon: '🚧', type: 'stun', cd: 5, desc: '道路封閉，所有相鄰敵方縣市到明天都無法出兵' },
+  c_hsr: { name: '高鐵快線', icon: '🚄', type: 'again', cd: 4, desc: '搭高鐵趕場，本縣今天可以再出兵一次' },
 };
 const ALL_SKILLS = { ...REGION_SKILLS, ...COMMON_SKILLS };
 

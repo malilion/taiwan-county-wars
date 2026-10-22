@@ -44,7 +44,7 @@ function fixture() {
   }`, context);
   let source = fs.readFileSync('js/game.js', 'utf8');
   const at = source.lastIndexOf('})();');
-  source = source.slice(0, at) + `Object.assign(harness, { S, initState, runLoop, endPlayerTurn, doAttack, saveCheckpoint, loadCheckpoint, saveRules, render, buildFacility, produceBuildings, income, defMult, openAttack, showStart, newGame, recruit, confirmTransfer, checkEnd, startInvasion, doExpedition, invasionRaid, expeditionAllowed, borderThreat, setPosture, atkMult, aiTurn });` + source.slice(at);
+  source = source.slice(0, at) + `Object.assign(harness, { S, initState, runLoop, endPlayerTurn, doAttack, saveCheckpoint, loadCheckpoint, saveRules, render, buildFacility, produceBuildings, income, defMult, openAttack, showStart, newGame, recruit, confirmTransfer, checkEnd, startInvasion, doExpedition, invasionRaid, expeditionAllowed, borderThreat, setPosture, atkMult, aiTurn, BV, startAim, aimAt, pickedArmy, nextTurn, openSkillPicker, useSkill, aiUseSkills });` + source.slice(at);
   vm.runInContext(source, context);
   const h = context.harness;
   h.initState('play', 'taipei');
@@ -92,7 +92,8 @@ test('checkpoint round trip includes custom units, skills, buildings and used ac
   const loaded = GameSaves.decode(GameSaves.encode(h.S, ['測試戰報']), h.saveRules);
   assert.equal(loaded.data.army.taipei.u1, 2);
   assert.ok(loaded.data.acted.has('taipei'));
-  assert.ok(loaded.data.library.has('taipei'));
+  assert.deepEqual([...loaded.data.slots.taipei], [...h.S.slots.taipei]);
+  assert.deepEqual([...loaded.data.slots.tainan], [...h.S.slots.tainan], 'AI counties keep their custom skill');
   assert.equal(loaded.data.buildings.taipei.readyDay, 4);
   assert.equal(loaded.data.skillReady['taipei:1'], 5);
 });
@@ -417,4 +418,181 @@ test('postures survive saving while old checkpoint postures default to balanced'
   saved.data.posture = Object.fromEntries(Object.keys(h.S.owner).map(id => [id, 'balanced']));
   saved.data.posture.taipei = 'invincible';
   assert.throws(() => GameSaves.decode(JSON.stringify(saved), h.saveRules));
+});
+
+// Advance fake timers until the battle screen reaches the requested clash.
+async function untilStep(f, step) {
+  for (let i = 0; i < 200 && !(f.h.BV.open && f.h.BV.step >= step); i++) { if (f.timers.length) f.timers.shift()(); await Promise.resolve(); }
+  assert.ok(f.h.BV.open && f.h.BV.step >= step, 'battle screen should be playing');
+}
+test('combat rounds start from the line-up, end at the result and support retreat at any clash', () => {
+  const r = Combat.resolve(options({ inf: 12, moto: 3 }, { gen: 14 }), () => 0.5);
+  assert.deepEqual(r.rounds[0].A, { inf: 12, moto: 3 }); assert.deepEqual(r.rounds[0].D, { gen: 14 });
+  assert.deepEqual(r.rounds.at(-1).A, r.A); assert.deepEqual(r.rounds.at(-1).D, r.D);
+  const early = Combat.retreat(r, 0);
+  assert.equal(early.lostA + early.lostD, 0); assert.equal(early.win, false); assert.ok(early.retreated);
+  const mid = Combat.retreat(r, 1);
+  assert.equal(Combat.count(mid.A) + mid.lostA, 15); assert.equal(Combat.count(mid.D) + mid.lostD, 14);
+});
+test('player battles open the battle screen and close it after the result', async () => {
+  const f = fixture(), { h, get } = f;
+  h.S.army.taipei = { inf: 10 }; h.S.army.newtaipei = { inf: 2 };
+  const battle = h.doAttack('taipei', 'newtaipei', h.S.gen, false, { inf: 9 });
+  await untilStep(f, 0);
+  assert.equal(get('#battleScreen').hidden, false);
+  assert.equal(get('#bsRetreat').hidden, false, 'the attacking player may retreat');
+  await f.flush(); await battle;
+  assert.equal(get('#battleScreen').hidden, true); assert.equal(h.BV.open, false);
+});
+test('strategic retreat keeps that clash\'s survivors, spares the target and uses the action', async () => {
+  const f = fixture(), { h, get } = f;
+  h.S.army.taipei = { inf: 21 }; h.S.army.newtaipei = { gen: 20 };
+  const battle = h.doAttack('taipei', 'newtaipei', h.S.gen, false, { inf: 20 });
+  await untilStep(f, 1);
+  get('#bsRetreat').handlers.click();
+  await f.flush(); await battle;
+  const r = h.S.lastBattle;
+  assert.ok(r.retreated); assert.equal(r.win, false);
+  assert.deepEqual(r.A, r.rounds[1].A); assert.deepEqual(r.D, r.rounds[1].D);
+  assert.equal(h.S.owner.newtaipei, 'newtaipei');
+  assert.equal(Combat.count(h.S.army.taipei), 1 + Combat.count(r.A));
+  assert.equal(Combat.count(h.S.army.newtaipei), Combat.count(r.D));
+  assert.ok(h.S.acted.has('taipei'));
+});
+test('defending players watch without a retreat button; lightning speed and AI-only battles skip the screen', async () => {
+  const f = fixture(), { h, get } = f;
+  h.S.current = 'newtaipei'; h.S.army.newtaipei = { inf: 10 }; h.S.army.taipei = { inf: 5 };
+  const defend = h.doAttack('newtaipei', 'taipei', h.S.gen, false, { inf: 4 });
+  await untilStep(f, 0);
+  assert.equal(get('#bsRetreat').hidden, true);
+  await f.flush(); await defend;
+  h.BV.step = 0; h.S.army.yilan = { inf: 6 }; h.S.army.hualien = { inf: 2 }; h.S.current = 'yilan';
+  const aiOnly = h.doAttack('yilan', 'hualien', h.S.gen, false, { inf: 5 });
+  await f.flush(); await aiOnly;
+  assert.equal(h.BV.step, 0, 'AI-only battle did not play');
+  h.S.speed = 99; h.S.current = 'taipei'; h.S.acted.clear();
+  h.S.army.taipei = { inf: 5 }; h.S.army.newtaipei = {};
+  const fast = h.doAttack('taipei', 'newtaipei', h.S.gen, false, { inf: 2 });
+  await f.flush(); await fast;
+  assert.equal(h.BV.step, 0); assert.equal(get('#battleScreen').hidden, true);
+});
+test('replacing the game mid-playback leaves the new game untouched', async () => {
+  const f = fixture(), { h } = f;
+  h.S.army.taipei = { inf: 21 }; h.S.army.newtaipei = { gen: 20 };
+  const old = h.doAttack('taipei', 'newtaipei', h.S.gen, false, { inf: 20 });
+  await untilStep(f, 1);
+  ++h.S.gen; h.initState('play', 'tainan');
+  const before = JSON.stringify({ owner: h.S.owner, army: h.S.army });
+  await f.flush(); await old;
+  assert.equal(JSON.stringify({ owner: h.S.owner, army: h.S.army }), before);
+});
+
+test('box-selected soldiers aim a red arrow at an enemy and prefill the attack, keeping one at home', () => {
+  const { h, get } = fixture();
+  h.S.army.taipei = { inf: 3, art: 2 };
+  assert.deepEqual({ ...h.pickedArmy('taipei', [3, 4]) }, { art: 2 }, 'cells follow the map card order');
+  assert.ok(h.startAim('taipei', [0, 1, 2, 3, 4]));
+  h.aimAt('newtaipei');
+  assert.equal(h.S.aim, null); assert.equal(get('#attackDialog').hidden, false);
+  assert.deepEqual({ ...h.S.attack.sent }, { inf: 2, art: 2 });
+  assert.deepEqual({ ...h.S.army.taipei }, { inf: 3, art: 2 }, 'nothing leaves before confirming');
+  assert.equal(h.S.acted.size, 0);
+});
+test('a blue arrow to a connected own county moves only the picked soldiers that fit', () => {
+  const { h } = fixture();
+  h.S.owner.newtaipei = 'taipei'; h.S.army.newtaipei = { inf: 24 }; h.S.army.taipei = { inf: 4, moto: 2 };
+  h.S.acted.add('taipei'); // moving troops is still allowed after attacking
+  assert.ok(h.startAim('taipei', [4, 5]));
+  h.aimAt('newtaipei');
+  assert.equal(Combat.count(h.S.army.newtaipei), 25);
+  assert.equal(Combat.count(h.S.army.taipei), 5);
+  assert.equal(h.S.army.newtaipei.moto, 1);
+});
+test('invalid arrow targets keep aiming; attacks need an unused, adjacent source', () => {
+  const { h, get } = fixture();
+  h.S.army.taipei = { inf: 5 };
+  h.startAim('taipei', [0, 1]);
+  h.aimAt('pingtung');
+  assert.ok(h.S.aim, 'still aiming after a far target'); assert.equal(get('#attackDialog').hidden, true);
+  h.S.acted.add('taipei');
+  h.aimAt('newtaipei');
+  assert.ok(h.S.aim); assert.equal(get('#attackDialog').hidden, true);
+  assert.equal(h.startAim('newtaipei', [0]), false, 'enemy soldiers cannot be picked');
+});
+test('the day ends with a news broadcast of captures and eliminations', async () => {
+  const f = fixture(), { h, get } = f;
+  h.S.speed = 99; h.S.army.newtaipei = {}; h.S.army.taipei = { inf: 5 };
+  const attack = h.doAttack('taipei', 'newtaipei', h.S.gen, false, { inf: 3 });
+  await f.flush(); await attack;
+  assert.deepEqual([...h.S.news.map(n => n.kind)], ['capture', 'elim']);
+  h.S.speed = 1; h.S.turnIdx = h.S.order.length - 1;
+  const day = h.S.day, done = h.nextTurn(h.S.gen);
+  await Promise.resolve();
+  assert.equal(get('#newsFlash').hidden, false);
+  assert.match(get('#newsBody').innerHTML, /新北市<\/b> 滅亡了/);
+  await f.flush(); await done;
+  assert.equal(get('#newsFlash').hidden, true);
+  assert.equal(h.S.day, day + 1); assert.equal(h.S.news.length, 0);
+  assert.ok(get('#log').children.some(c => c.innerHTML.includes('晚間新聞')));
+});
+
+const pickSkill = (get, key) => get('#spList').handlers.click({ target: { closest: () => ({ dataset: { key } }) } });
+test('every county has a fixed regional skill plus one of ten custom skills', () => {
+  const { h, get, context } = fixture();
+  const custom = Object.keys(vm.runInContext('COMMON_SKILLS', context));
+  assert.equal(custom.length, 10);
+  for (const [id, [own, extra]] of Object.entries(h.S.slots)) {
+    assert.equal(own, id);
+    if (id === 'taipei') assert.equal(extra, null, 'the player sets the home custom skill');
+    else assert.ok(custom.includes(extra), `${id} AI custom skill`);
+  }
+  assert.ok(h.openSkillPicker('taipei'));
+  assert.equal(get('#spList').innerHTML.match(/data-key=/g).length, 10);
+  assert.equal(h.openSkillPicker('tainan'), false, 'cannot edit an enemy county');
+});
+test('a custom skill locks once chosen and can be used like the regional one', () => {
+  const { h, get } = fixture();
+  h.openSkillPicker('taipei');
+  pickSkill(get, 'c_build');
+  assert.equal(h.S.slots.taipei[1], 'c_build');
+  assert.equal(h.openSkillPicker('taipei'), false, 'locked until the county changes hands');
+  const money = h.S.money.taipei;
+  assert.ok(h.useSkill('taipei', 1));
+  assert.equal(h.S.money.taipei, money + 60);
+  assert.equal(h.useSkill('taipei', 1), false, 'custom slot has its own cooldown');
+});
+test('capturing a county clears its custom skill and asks the player to choose again', async () => {
+  const f = fixture(), { h, get } = f;
+  h.S.army.taipei = { inf: 6 }; h.S.army.newtaipei = {};
+  const aiSkill = h.S.slots.newtaipei[1];
+  assert.ok(aiSkill);
+  h.openAttack('taipei', 'newtaipei');
+  const confirm = get('#attackConfirm').handlers.click();
+  await f.flush(); await confirm;
+  assert.equal(h.S.owner.newtaipei, 'taipei');
+  assert.equal(h.S.slots.newtaipei[1], null);
+  assert.equal(get('#skillPicker').hidden, false);
+  assert.match(get('#spTitle').innerHTML, /攻下/);
+  pickSkill(get, 'c_jam');
+  assert.equal(h.S.slots.newtaipei[1], 'c_jam');
+});
+test('an AI that takes a player county picks its own custom skill', async () => {
+  const f = fixture(), { h } = f;
+  h.S.slots.taipei[1] = 'c_build'; h.S.speed = 99;
+  h.S.current = 'newtaipei'; h.S.army.newtaipei = { gen: 20 }; h.S.army.taipei = { inf: 1 };
+  const attack = h.doAttack('newtaipei', 'taipei', h.S.gen, false, { gen: 19 });
+  await f.flush(); await attack;
+  assert.equal(h.S.owner.taipei, 'newtaipei');
+  assert.ok(h.S.slots.taipei[1] && h.S.slots.taipei[1].startsWith('c_'));
+  assert.equal(h.openSkillPicker('taipei'), false);
+});
+test('old saves drop regional skills from custom slots and fill in AI slots', () => {
+  const { h } = fixture();
+  const save = JSON.parse(GameSaves.encode(h.S));
+  save.data.slots = { taipei: ['taipei', 'tainan'] };
+  const loaded = GameSaves.decode(JSON.stringify(save), h.saveRules);
+  assert.deepEqual([...loaded.data.slots.taipei], ['taipei', null]);
+  assert.deepEqual([...loaded.data.slots.kaohsiung], ['kaohsiung', null]);
+  const bad = structuredClone(save); bad.data.slots.taipei = ['taipei', 'nope'];
+  assert.throws(() => GameSaves.decode(JSON.stringify(bad), h.saveRules));
 });

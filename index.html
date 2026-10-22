@@ -6,7 +6,7 @@
   <title>台灣縣市大戰</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@400;700;900&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="style.css?v=20261022c">
+  <link rel="stylesheet" href="style.css?v=20261022f">
 </head>
 <body>
   <header id="top">
@@ -67,6 +67,11 @@
     </aside>
   </main>
 
+  <div id="newsFlash" class="newsFlash" hidden role="status" aria-live="polite">
+    <div class="newsHead"><span class="newsLive">📺 LIVE</span><b id="newsTitle"></b><span class="newsStation">縣市新聞台</span></div>
+    <div id="newsBody"></div>
+    <p id="newsFoot"></p>
+  </div>
   <div id="toast"></div>
   <div id="tip" hidden></div>
 
@@ -90,7 +95,7 @@
             <li>點選自己的縣市可以<b>招兵</b>（每個縣市最多 25 人）；每個縣市每天可以<b>出兵一次</b>，點相鄰敵方縣市後，配置兵力並確認出征（至少留 1 人守家）。</li>
             <li>按「🚚 調兵」可以把部隊分配到任何<b>相連的己方縣市</b>，自選兵種與人數，不限次數。</li>
             <li>兵種相剋：🛵 機車 剋 💣 砲兵 剋 👺 八家將 剋 🪖 阿兵哥 剋 🛵 機車。</li>
-            <li>每個縣市都有專屬的<b>固有技能（不能更換）</b>。你的老家和<b>每個佔領的縣市都多一個自訂技能欄</b>：從技能庫（通用技能＋老家＋所有佔領過的縣市技能）挑選裝上。</li>
+            <li>每個縣市都有<b>兩個技能</b>：專屬的<b>固有技能（不能更換）</b>，加上從 <b>10 種自訂技能</b>挑一個。自訂技能設定後鎖定，<b>佔領別的縣市時可以重新設定</b>它的自訂技能。</li>
             <li>按「🛠️ 組建兵種」可以自己搭配武器＋防具＋坐騎，打造專屬部隊（最多 4 種）。</li>
             <li>每個縣市有特性（例如苗栗國防禦 +25%）；研發可以永久提升攻擊、防禦或稅收。</li>
             <li>簡單／普通難度開局有和平期，AI 不會主動開戰，可以先專心併吞鄰近縣市。</li>
@@ -121,6 +126,28 @@
       <div id="attackEstimate" class="attackEstimate" aria-live="polite"></div>
       <p id="attackHint" class="hint">每個縣市每日出兵一次；失敗後殘兵撤回，攻陷後駐守新領土。</p>
       <div class="dzBtns"><button id="attackCancel">取消</button><button id="attackConfirm" class="primary">確認出征</button></div>
+    </div>
+  </div>
+
+  <div id="battleScreen" class="battleScreen" hidden role="dialog" aria-modal="true" aria-labelledby="bsTitle">
+    <div class="bsFrame">
+      <header class="bsHead">
+        <span id="bsEmblem" class="bsEmblem"></span>
+        <h2 id="bsTitle"></h2>
+        <span id="bsTimer" class="bsTimer"></span>
+      </header>
+      <div id="bsSides" class="bsSides"></div>
+      <div class="bsStage">
+        <div id="bsField" class="bsField"></div>
+        <div id="bsStamp" class="bsStamp" hidden role="status"></div>
+      </div>
+      <footer class="bsFoot">
+        <div class="bsCtrl">
+          <button id="bsPause" aria-label="暫停戰鬥">⏸</button><button id="bsFast" aria-label="切換戰鬥速度">⏩ 1x</button><button id="bsSkip">⏭ 略過</button>
+        </div>
+        <button id="bsRetreat" class="bsRetreat">🏳️ 戰略撤退！</button>
+        <button id="bsDone" class="primary" hidden>繼續 ▶</button>
+      </footer>
     </div>
   </div>
 
@@ -164,12 +191,12 @@
   </div>
 
   <script src="https://cdn.jsdelivr.net/npm/d3-delaunay@6.0.4/dist/d3-delaunay.min.js"></script>
-  <script src="js/data.js?v=20261022c"></script>
-  <script src="js/map.js?v=20261022c"></script>
-  <script src="js/combat.js?v=20261022c"></script>
-  <script src="js/invasion.js?v=20261022c"></script>
-  <script src="js/saves.js?v=20261022c"></script>
-  <script src="js/game.js?v=20261022c"></script>
+  <script src="js/data.js?v=20261022f"></script>
+  <script src="js/map.js?v=20261022f"></script>
+  <script src="js/combat.js?v=20261022f"></script>
+  <script src="js/invasion.js?v=20261022f"></script>
+  <script src="js/saves.js?v=20261022f"></script>
+  <script src="js/game.js?v=20261022f"></script>
 </body>
 </html>
 

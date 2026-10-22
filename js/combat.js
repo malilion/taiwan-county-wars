@@ -50,13 +50,23 @@ const Combat = (() => {
         army[k] -= Math.min(kills, army[k]);
       }
     }
+    // rounds[0] is the opening line-up; rounds[i] is the field after clash i (used by the battle screen).
+    const rounds = [{ A: { ...A }, D: { ...D }, toA: {}, toD: {} }];
     for (let round = 0; round < 8 && count(A) > a0 * 0.35 && count(D); round++) {
       const toD = damage(A, D, attackMult / defenseMult, attackerMoto);
       const toA = damage(D, A, defenderAttack, defenderMoto);
       apply(D, toD);
       apply(A, toA);
+      rounds.push({ A: { ...A }, D: { ...D }, toA, toD });
     }
-    return { A, D, win: count(D) === 0 && count(A) > 0, lostA: a0 - count(A), lostD: d0 - count(D) };
+    return { A, D, win: count(D) === 0 && count(A) > 0, lostA: a0 - count(A), lostD: d0 - count(D), rounds };
+  }
+
+  // Strategic retreat: the attacker leaves after clash `step`, keeping that moment's survivors.
+  function retreat(result, step) {
+    const at = result.rounds[Math.max(0, Math.min(step, result.rounds.length - 1))], start = result.rounds[0];
+    return { A: { ...at.A }, D: { ...at.D }, win: false, retreated: true, rounds: result.rounds,
+      lostA: count(start.A) - count(at.A), lostD: count(start.D) - count(at.D) };
   }
 
   // Seeded local RNG: opening the dialog never consumes the game's randomness.
@@ -71,6 +81,6 @@ const Combat = (() => {
     }
     return { chance: Math.round(wins / trials * 100), lostA: Math.round(lostA / trials), lostD: Math.round(lostD / trials) };
   }
-  return { plan, planSize, validDeployment, resolve, estimate, count };
+  return { plan, planSize, validDeployment, resolve, retreat, estimate, count };
 })();
 if (typeof module !== 'undefined') module.exports = Combat;
