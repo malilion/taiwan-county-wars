@@ -666,3 +666,38 @@ test('the player moves their own rows with the bottom buttons during a battle', 
   const r = h.S.lastBattle;
   assert.ok(Combat.count(r.A) === 0 || Combat.count(r.D) === 0);
 });
+
+test('the AI side re-arranges after each round to counter the current line-up', () => {
+  const o = { ...options({ inf: 20, moto: 20 }, { gen: 10, art: 12 }), attackMult: 0.1, defenderAttack: 0.1, adapt: 'D' }, st = Combat.setup(o); // 低傷害：只測排兵
+  assert.equal(st.laneD.join(), 'gen,art');
+  Combat.step(st, o, () => 0.5);
+  assert.equal(st.laneD.join(), 'art,gen', 'gen moves to counter inf, art leaves the moto lane');
+  assert.equal(st.adapted, 1);
+  const fixed = { ...o, adapt: '' }, still = Combat.setup(fixed);
+  Combat.step(still, fixed, () => 0.5);
+  assert.equal(still.laneD.join(), 'gen,art', 'adapt can be turned off');
+});
+test('a row can be sent straight at any enemy row, e.g. the last one', () => {
+  const o = { ...options({ moto: 5, inf: 5 }, { inf: 6, gen: 3, art: 4 }), adapt: '' };
+  const plain = Combat.setup(o), aimed = Combat.setup(o);
+  const inf = aimed.laneA.indexOf('inf');
+  assert.notEqual(aimed.laneD[inf], 'art', 'art is not opposite the infantry row by default');
+  assert.ok(Combat.aim(aimed, 'A', 'inf', 'art'));
+  Combat.step(plain, o, () => 0.5); Combat.step(aimed, o, () => 0.5);
+  assert.ok(aimed.rounds[1].toD.art > (plain.rounds[1].toD.art || 0));
+  assert.equal(Combat.aim(aimed, 'A', 'inf', 'nope'), false);
+  assert.ok(Combat.aim(aimed, 'A', 'inf', null)); assert.equal(aimed.aimA.inf, undefined);
+});
+test('in battle the player picks a row, then clicks an enemy row to target it', async () => {
+  const f = fixture(), { h, get } = f;
+  h.S.army.taipei = { inf: 10, moto: 6 }; h.S.army.newtaipei = { inf: 8, gen: 6, art: 6 };
+  const battle = h.doAttack('taipei', 'newtaipei', h.S.gen, false, { inf: 9, moto: 6 });
+  await untilStep(f, 0);
+  const click = target => get('#bsField').handlers.click({ target: { closest: sel => target[sel] || null } });
+  const motoLane = h.BV.st.laneA.indexOf('moto');
+  click({ '[data-lane]': { dataset: { lane: String(motoLane) } } });
+  click({ '[data-foe]': { dataset: { foe: 'art' } } });
+  assert.equal(h.BV.st.aimA.moto, 'art');
+  assert.match(get('#bsField').innerHTML, /🎯 第 \d 排/);
+  await f.flush(); await battle;
+});
