@@ -21,6 +21,7 @@
   const iconMarkup = (icon, cls = 'unit-sprite') => typeof icon === 'string' && icon.startsWith('assets/')
     ? `<img class="${cls}" src="${icon}" alt="">` : icon;
   const fmtMoney = n => `${Math.floor(n)} 萬`;
+  const esc = text => String(text).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 
   const S = { gen: 0, speed: 1, paused: false, over: true, hover: null, diffKey: 'easy' };
   const map = buildMap($('#map'), onCountyClick, id => { S.hover = id; if (!S.sel) renderInfo(); renderTip(); });
@@ -34,16 +35,17 @@
   const cTag = id => `<span class="ctag">${byId[id].short}</span>`;
   const unitIcon = (k, cls = 'unit-sprite') => iconMarkup(U(k).sprite || U(k).icon, cls);
   const unitCost = (k, id) => Math.round(U(k).cost * (byId[id].cheap === U(k).cls ? 0.8 : 1));
-  const unitsOf = f => [...UNIT_KEYS, ...Object.keys(S.units).filter(k => S.units[k].owner === f)];
+  const eliteUnlocked = f => S.research[f].atk === 5 && S.research[f].def === 5;
+  const unitsOf = f => [...UNIT_KEYS, ...(eliteUnlocked(f) ? ['elite'] : []), ...Object.keys(S.units).filter(k => S.units[k].owner === f)];
   const customOf = f => Object.keys(S.units).filter(k => S.units[k].owner === f);
   const armyHtml = a => kinds(a).length
-    ? kinds(a).map(k => `<span title="${U(k).name}（${UNIT_CLASSES[U(k).cls]}）">${unitIcon(k)}<b>${a[k]}</b></span>`).join('')
+    ? kinds(a).map(k => `<span title="${esc(U(k).name)}（${UNIT_CLASSES[U(k).cls]}）">${unitIcon(k)}<b>${a[k]}</b></span>`).join('')
     : '<span class="emptyArmy">空城</span>';
   const researchCost = (f, k) => 120 * (S.research[f][k] + 1);
 
   function income(f) {
     const ids = owned(f);
-    let n = ids.reduce((s, id) => s + byId[id].econ, 0) * (1 + 0.15 * S.research[f].eco);
+    let n = ids.reduce((s, id) => s + byId[id].econ + (BUILDINGS[S.buildings[id]?.type]?.income || 0), 0) * (1 + 0.15 * S.research[f].eco);
     for (const r of REGIONS) if (r.ids.every(id => S.owner[id] === f)) n += r.bonus;
     return Math.round(n);
   }
@@ -55,15 +57,15 @@
   const defBuff = id => S.buff[id]?.def && S.buff[id].defUntil >= S.day ? S.buff[id].def : 1;
   const stunned = id => (S.stun[id] || 0) >= S.day;
   const atkMult = (f, id) => byId[id].atk * (1 + 0.12 * S.research[f].atk) * atkBuff(id);
-  const defMult = (f, id) => byId[id].def * (1 + 0.12 * S.research[f].def) * defBuff(id);
+  const defMult = (f, id) => byId[id].def * (1 + 0.12 * S.research[f].def) * defBuff(id) * (BUILDINGS[S.buildings[id]?.type]?.defense || 1);
 
   // ───────── 新遊戲 ─────────
   function initState(mode, player) {
     Object.assign(S, {
       mode, player: player || null, over: false, day: 1, turnIdx: 0, current: null, sel: null, busy: false,
       sendHalf: false, acted: new Set(), owner: {}, army: {}, money: {}, research: {}, aggr: {}, paused: false,
-      units: Object.fromEntries(UNIT_KEYS.map(k => [k, { ...UNITS[k], owner: null }])), unitSeq: 0,
-      skillReady: {}, buff: {}, stun: {},
+      units: Object.fromEntries(Object.keys(UNITS).map(k => [k, { ...UNITS[k], owner: null }])), unitSeq: 0,
+      buildings: Object.fromEntries(COUNTIES.map(c => [c.id, null])), skillReady: {}, buff: {}, stun: {}, menuOpen: false, transferMode: false, attack: null, lastBattle: null,
     });
     COUNTIES.forEach(c => {
       S.owner[c.id] = c.id;
@@ -84,8 +86,11 @@
 
   function newGame(mode, player) {
     S.gen++;
+    closeActionDialogs();
+    clearArrows();
     initState(mode, player);
-    S.diff = DIFFICULTY[mode === 'play' ? S.diffKey : 'hard'];
+    S.gameDiffKey = mode === 'play' ? S.diffKey : 'hard';
+    S.diff = DIFFICULTY[S.gameDiffKey];
     $('#log').innerHTML = '';
     log(mode === 'play'
       ? `📣 ${fTag(player)} 宣布出征！目標：統一全台 22 縣市。（難度：${S.diff.name}）`
@@ -101,7 +106,7 @@
   async function wait(mult = 1, gen) {
     const ms = S.speed >= 99 ? 0 : 550 * mult / S.speed;
     await new Promise(r => setTimeout(r, ms));
-    while (S.paused && gen === S.gen) await new Promise(r => setTimeout(r, 120));
+    while ((S.paused || S.menuOpen) && gen === S.gen) await new Promise(r => setTimeout(r, 120));
   }
 
   async function runLoop(gen) {
@@ -109,6 +114,7 @@
       const f = S.order[S.turnIdx];
       if (owned(f).length) {
         S.current = f;
+        produceBuildings(f);
         const inc = income(f);
         S.money[f] += inc;
         // 替代役：兵力太少的縣市每天自動補 1 名阿兵哥
@@ -131,6 +137,7 @@
   }
 
   async function nextTurn(gen) {
+    if (gen !== S.gen || S.over) return;
     S.turnIdx++;
     if (S.turnIdx >= S.order.length) {
       S.turnIdx = 0;
@@ -144,66 +151,47 @@
   }
 
   function endPlayerTurn() {
-    if (S.mode !== 'play' || S.current !== S.player || S.busy || S.over) return;
+    if (!playerActive()) return;
+    saveCheckpoint('auto');
+    const gen = S.gen;
     S.sel = null;
     S.transferMode = false;
     S.current = null;
-    nextTurn(S.gen).then(() => runLoop(S.gen));
+    render();
+    nextTurn(gen).then(() => { if (gen === S.gen) runLoop(gen); });
   }
 
   // ───────── 戰鬥 ─────────
-  function applyDamage(army, dmgByType) {
-    for (const k of kinds(army)) {
-      const x = (dmgByType[k] || 0) / U(k).hp;
-      const kills = Math.floor(x) + (Math.random() < x % 1 ? 1 : 0);
-      army[k] -= Math.min(kills, army[k]);
-    }
-  }
-  function dealDamage(from, to, mult, motoBonus) {
-    const total = count(to);
-    const out = {};
-    if (!total) return out;
-    for (const k of kinds(from)) {
-      const dmg = from[k] * U(k).atk * mult * (U(k).cls === 'moto' ? motoBonus : 1) * rand(0.8, 1.2) * 0.35;
-      for (const j of kinds(to)) out[j] = (out[j] || 0) + dmg * (to[j] / total) * (COUNTERS[U(k).cls] === U(j).cls ? 1.6 : 1);
-    }
-    return out;
+  function combatOptions(src, tgt, sent) {
+    const fa = S.owner[src], fd = S.owner[tgt];
+    return { sent, defenders: S.army[tgt], units: S.units, counters: COUNTERS,
+      attackMult: atkMult(fa, src), defenseMult: defMult(fd, tgt),
+      defenderAttack: 1 + 0.12 * S.research[fd].atk,
+      attackerMoto: byId[src].moto || 1, defenderMoto: byId[tgt].moto || 1 };
   }
 
-  function resolveBattle(src, tgt, sent) {
+  async function doAttack(src, tgt, gen, half = false, deployment = null) {
+    if (gen !== S.gen || S.over) return;
     const fa = S.owner[src], fd = S.owner[tgt];
-    const A = { ...sent }, D = { ...S.army[tgt] };
-    const am = atkMult(fa, src), dm = defMult(fd, tgt);
-    const a0 = count(A), d0 = count(D);
-    // 攻方剩不到 35% 就撤退
-    for (let round = 0; round < 8 && count(A) > a0 * 0.35 && count(D); round++) {
-      const toD = dealDamage(A, D, am / dm, byId[src].moto || 1);
-      const toA = dealDamage(D, A, 1 + 0.12 * S.research[fd].atk, byId[tgt].moto || 1);
-      applyDamage(D, toD);
-      applyDamage(A, toA);
-    }
-    return { A, D, win: count(D) === 0 && count(A) > 0, lostA: a0 - count(A), lostD: d0 - count(D) };
-  }
-
-  async function doAttack(src, tgt, gen, half = false) {
-    const fa = S.owner[src], fd = S.owner[tgt];
-    const sent = splitArmy(src, half);
-    // 至少留一兵守家（留最便宜的）
-    if (!count(S.army[src]) && count(sent) > 1) {
-      const k = kinds(sent).sort((a, b) => U(a).cost - U(b).cost)[0];
-      sent[k]--; addUnits(S.army[src], k, 1);
-    }
+    const sent = deployment ? { ...deployment } : Combat.plan(S.army[src], S.units, half);
+    if (fa === fd || !ADJ[src].has(tgt) || S.acted.has(src) || stunned(src) || !Combat.validDeployment(S.army[src], sent, S.units)) return;
+    for (const k of kinds(sent)) S.army[src][k] -= sent[k];
     S.acted.add(src);
     showArrow(src, tgt, byId[fa].color);
     render();
     await wait(0.9, gen);
-    const r = resolveBattle(src, tgt, sent);
+    if (gen !== S.gen || S.over) return;
+    const r = Combat.resolve(combatOptions(src, tgt, sent));
+    if (fa === S.player || fd === S.player) S.lastBattle = { src, tgt, fa, fd, sent: count(sent), defenders: count(S.army[tgt]), ...r };
     if (S.buff[src]) delete S.buff[src].atk; // 進攻加成用掉了
     clearArrows();
     battleBurst(src, 'attack');
     battleBurst(tgt, r.win ? 'win' : 'block');
     if (r.win) {
       S.owner[tgt] = fa;
+      // 佔領後重新整備，不能跨勢力重複領取即將到期的產兵。
+      const facility = S.buildings[tgt];
+      if (facility) facility.readyDay = S.day + (BUILDINGS[facility.type].period || 0);
       claimSlots(tgt);
       S.army[tgt] = r.A;
       S.acted.add(tgt);
@@ -302,6 +290,11 @@
       if (S.research[f][k] < 5 && S.money[f] >= researchCost(f, k)) { S.money[f] -= researchCost(f, k); S.research[f][k]++; }
     }
     aiUseSkills(f);
+    const site = owned(f).find(id => !S.buildings[id]);
+    if (site && S.money[f] > 300 && Math.random() < 0.3) {
+      const type = eliteUnlocked(f) && S.money[f] > 500 ? 'summon' : isFront(site) ? 'fort' : 'barracks';
+      buildFacility(site, type);
+    }
     // 組建新兵種
     if (S.day >= 4 && S.money[f] > 200 && customOf(f).length < 2 && Math.random() < 0.12) aiDesign(f);
     // 招兵：集中在最有機會進攻或最受威脅的前線
@@ -377,7 +370,7 @@
     const spec = designUnit(pickPart(PARTS.weapon).id, pickPart(PARTS.armor).id, pickPart(PARTS.mount).id);
     const name = byId[f].short + pick(AI_UNIT_SUFFIX);
     createUnit(f, name, pick(UNIT_ICONS), spec);
-    log(`🛠️ ${fTag(f)} 組建新兵種「${name}」（${spec.parts.join('＋')}）`, 'event');
+    log(`🛠️ ${fTag(f)} 組建新兵種「${esc(name)}」（${spec.parts.join('＋')}）`, 'event');
   }
 
   function createUnit(f, name, icon, spec) {
@@ -401,6 +394,37 @@
       if (!to || !count(S.army[id])) return;
       moveTroops(id, to, false);
     });
+  }
+
+  // ───────── 縣市經營（每縣一格，拆除無退款） ─────────
+  function buildFacility(id, type) {
+    const b = BUILDINGS[type], f = S.owner[id];
+    if (!b || S.buildings[id] || S.money[f] < b.cost || (b.elite && !eliteUnlocked(f))) return false;
+    S.money[f] -= b.cost;
+    S.buildings[id] = { type, readyDay: S.day + (b.period || 0) };
+    log(`${b.icon} ${fTag(f)} 在 ${cTag(id)} 建成「${b.name}」`, f === S.player ? 'me' : '');
+    return true;
+  }
+  function produceBuildings(f) {
+    for (const id of owned(f)) {
+      const facility = S.buildings[id], b = BUILDINGS[facility?.type];
+      if (!b?.period || facility.readyDay > S.day) continue;
+      if (addCapped(id, b.unit, 1)) {
+        facility.readyDay = S.day + b.period;
+        log(`${b.icon} ${cTag(id)} 的${b.name}產出 1 名${UNITS[b.unit].name}`, f === S.player ? 'me' : '');
+      }
+    }
+  }
+  function facilityHtml(id, canEdit) {
+    const facility = S.buildings[id], b = BUILDINGS[facility?.type];
+    if (b) return `<div class="facility"><div><b>${b.icon} ${b.name}</b><small>${b.desc}</small>
+      ${b.period ? `<span class="facilityTimer">${facility.readyDay <= S.day ? '等待營區空位' : `距下次產兵 ${facility.readyDay - S.day} 天`}</span>` : ''}</div>
+      ${canEdit ? '<button id="demolishBtn">拆除</button>' : ''}</div>`;
+    if (!canEdit) return '<p class="hint">🏗️ 縣市設施：尚未建設</p>';
+    return `<details class="facilityPicker"><summary>🏗️ 建設縣市設施（1 格）</summary><div>${Object.entries(BUILDINGS).map(([type, spec]) => {
+      const locked = spec.elite && !eliteUnlocked(S.player);
+      return `<button data-build="${type}" ${locked || S.money[S.player] < spec.cost ? 'disabled' : ''}><b>${spec.icon} ${spec.name}・${spec.cost} 萬</b><small>${spec.desc}${locked ? '（尚未解鎖）' : ''}</small></button>`;
+    }).join('')}</div><small>拆除無退款；被佔領時設施保留、產兵重新計時。</small></details>`;
   }
 
   // ───────── 地域技能 ─────────
@@ -505,7 +529,7 @@
   }
 
   // ───────── 玩家操作 ─────────
-  const playerActive = () => S.mode === 'play' && !S.over && S.current === S.player && !S.busy;
+  const playerActive = () => S.mode === 'play' && !S.over && S.current === S.player && !S.busy && !S.menuOpen;
 
   async function onCountyClick(id) {
     if (S.over) return;
@@ -517,19 +541,81 @@
       S.transferMode = false;
       if (sel && mine && id !== sel && reachable(sel).has(id)) return openTransfer(sel, id);
     }
-    if (sel && sel !== id && !mine && ADJ[sel].has(id) && !S.acted.has(sel) && count(S.army[sel])) {
+    if (sel && sel !== id && !mine && ADJ[sel].has(id) && !S.acted.has(sel) && count(S.army[sel]) > 1) {
       if (stunned(sel)) return flash(`${byId[sel].short} 被困住了，到第 ${S.stun[sel]} 天都無法出兵`);
-      S.busy = true;
-      const gen = S.gen;
-      await doAttack(sel, id, gen, S.sendHalf);
-      if (gen !== S.gen) return;
-      S.busy = false;
-      S.sel = S.owner[id] === S.player ? id : sel;
-      render();
+      openAttack(sel, id);
       return;
     }
     S.sel = id;
     render();
+  }
+
+  function closeActionDialogs() {
+    for (const id of ['designer', 'transfer', 'skillPicker', 'attackDialog']) $('#' + id).hidden = true;
+    S.attack = S.tr = S.picker = S.draft = null;
+  }
+
+  function openAttack(src, tgt) {
+    S.attack = { src, tgt, sent: Combat.plan(S.army[src], S.units, S.sendHalf) };
+    $('#attackDialog').hidden = false;
+    $('#tip').hidden = true;
+    renderAttack();
+    $('#attackCancel').focus();
+  }
+  function renderAttack() {
+    const { src, tgt, sent } = S.attack;
+    const total = count(sent), reserve = count(S.army[src]) - total;
+    $('#attackTitle').textContent = `${byId[src].short} → ${byId[tgt].short}`;
+    $('#attackForces').innerHTML = `<div><small>出征部隊</small><b>${total}<em> 人</em></b><span>本土留守 ${reserve} 人</span></div>
+      <span class="versus">VS</span><div><small>${byId[S.owner[tgt]].short}守軍</small><b>${count(S.army[tgt])}<em> 人</em></b><span>防禦加成 ×${defMult(S.owner[tgt], tgt).toFixed(2)}</span></div>`;
+    $('#attackRows').innerHTML = kinds(S.army[src]).map(k => `<div class="deployRow"><span>${unitIcon(k)} ${esc(U(k).name)}<small>${UNIT_CLASSES[U(k).cls]}・現有 ${S.army[src][k]}</small></span>
+      <div class="deployControl"><button data-unit="${k}" data-delta="-1" aria-label="減少${esc(U(k).name)}" ${!sent[k] ? 'disabled' : ''}>−</button>
+      <b>${sent[k] || 0}</b><button data-unit="${k}" data-delta="1" aria-label="增加${esc(U(k).name)}" ${sent[k] >= S.army[src][k] || reserve <= 1 ? 'disabled' : ''}>＋</button></div></div>`).join('');
+    const valid = Combat.validDeployment(S.army[src], sent, S.units);
+    const estimate = valid ? Combat.estimate(combatOptions(src, tgt, sent)) : null;
+    $('#attackEstimate').innerHTML = estimate ? `<div class="estimateTop"><span>預估攻陷機率</span><b class="${estimate.chance >= 65 ? 'hl-g' : 'hl-r'}">${estimate.chance}%</b></div>
+      <div class="estimateBar"><i style="width:${estimate.chance}%"></i></div>
+      <p>平均折損：我軍 ${estimate.lostA} 人／守軍 ${estimate.lostD} 人</p>
+      <small>依目前兵種相剋、研發、地域與技能加成模擬 160 次；實戰仍有隨機性。</small>` : '<p>請選擇至少 1 名出征部隊，並留 1 人守家。</p>';
+    $('#attackConfirm').disabled = !valid;
+    $('#attackConfirm').textContent = `⚔️ 確認出征 ${total} 人`;
+  }
+  $('#attackRows').addEventListener('click', e => {
+    const b = e.target.closest('button[data-unit]');
+    if (!b || !S.attack) return;
+    const { src, sent } = S.attack, k = b.dataset.unit, delta = Number(b.dataset.delta);
+    if (delta > 0 && count(sent) >= count(S.army[src]) - 1) return;
+    sent[k] = Math.max(0, Math.min(S.army[src][k], (sent[k] || 0) + delta));
+    renderAttack();
+  });
+  $('#attackPresets').addEventListener('click', e => {
+    const b = e.target.closest('button[data-plan]');
+    if (!b || !S.attack) return;
+    S.attack.sent = b.dataset.plan === 'none' ? {} : Combat.plan(S.army[S.attack.src], S.units, b.dataset.plan === 'half');
+    renderAttack();
+  });
+  $('#attackCancel').addEventListener('click', () => { $('#attackDialog').hidden = true; S.attack = null; });
+  $('#attackConfirm').addEventListener('click', async () => {
+    if (!playerActive() || !S.attack) return;
+    const { src, tgt, sent } = S.attack;
+    if (S.owner[src] !== S.player || S.owner[tgt] === S.player || S.acted.has(src) || stunned(src) || !Combat.validDeployment(S.army[src], sent, S.units)) return;
+    $('#attackDialog').hidden = true;
+    S.attack = null;
+    S.busy = true;
+    const gen = S.gen;
+    await doAttack(src, tgt, gen, false, sent);
+    if (gen !== S.gen) return;
+    S.busy = false;
+    S.sel = S.owner[tgt] === S.player ? tgt : src;
+    render();
+  });
+  function renderBattleReport() {
+    const box = $('#battleReport'), r = S.lastBattle;
+    box.hidden = !r;
+    if (!r) return;
+    box.innerHTML = `<h4>最近一場戰役</h4><div class="reportTitle">${byId[r.src].short} → ${byId[r.tgt].short}<b class="${r.win ? 'hl-g' : 'hl-r'}">${r.win ? '攻陷' : '守住'}</b></div>
+      <div class="reportStats"><span>攻方 ${r.sent} → ${count(r.A)} 人<small>折損 ${r.lostA} 人</small></span><span>守方 ${r.defenders} → ${count(r.D)} 人<small>折損 ${r.lostD} 人</small></span></div>
+      <p class="hint">${r.win ? `剩餘攻方部隊進駐${byId[r.tgt].short}。` : '攻方殘兵已撤回出兵縣市。'}出兵縣市今日行動已使用。</p>`;
   }
 
   // 透過己方領土（含海路）連通的縣市
@@ -553,7 +639,7 @@
     const src = S.army[from];
     $('#trTitle').innerHTML = `🚚 從 ${cTag(from)} 調兵到 ${cTag(to)}`;
     $('#trRows').innerHTML = kinds(src).map(k => `<div class="trRow">
-      <span class="trName">${unitIcon(k)} ${U(k).name}<small>現有 ${src[k]}</small></span>
+      <span class="trName">${unitIcon(k)} ${esc(U(k).name)}<small>現有 ${src[k]}</small></span>
       <span class="trCtl">
         <button data-k="${k}" data-d="-1" ${!amt[k] ? 'disabled' : ''}>−</button>
         <b>${amt[k] || 0}</b>
@@ -601,7 +687,7 @@
     if (S.money[S.player] < cost) return flash('錢不夠！');
     S.money[S.player] -= cost;
     addUnits(S.army[id], k, 1);
-    flash(`${U(k).name} +1　💰 -${cost} 萬（剩 ${fmtMoney(S.money[S.player])}）`, 'good');
+    flash(`${esc(U(k).name)} +1　💰 -${cost} 萬（剩 ${fmtMoney(S.money[S.player])}）`, 'good');
     render();
   }
   function doResearch(k) {
@@ -637,11 +723,11 @@
     const beats = UNIT_CLASSES[COUNTERS[spec.cls]];
     const beatenBy = UNIT_CLASSES[UNIT_KEYS.find(c => COUNTERS[c] === spec.cls)];
     $('#dzPreview').innerHTML = `<span class="big">${iconMarkup(d.icon, 'avatar-large')}</span><div>
-      <h3>${name} <small style="color:var(--accent)">${UNIT_CLASSES[spec.cls]}</small></h3>
+      <h3>${esc(name)} <small style="color:var(--accent)">${UNIT_CLASSES[spec.cls]}</small></h3>
       <div class="stats"><span>⚔️ 攻擊 <b>${spec.atk}</b></span><span>❤️ 血量 <b>${spec.hp}</b></span><span>💰 單價 <b>${spec.cost} 萬</b></span></div>
       <div class="cmp">剋 ${beats}、怕 ${beatenBy}｜同兵系基本兵：${unitIcon(spec.cls)}${base.name} 攻${base.atk}/血${base.hp}/${base.cost}萬</div></div>`;
     const mine = customOf(S.player);
-    $('#dzMine').innerHTML = `已組建 ${mine.length}/${MAX_CUSTOM_UNITS}：` + (mine.map(k => `<span class="mu">${unitIcon(k, 'unit-avatar-mini')} ${U(k).name}</span>`).join('') || '（還沒有）');
+    $('#dzMine').innerHTML = `已組建 ${mine.length}/${MAX_CUSTOM_UNITS}：` + (mine.map(k => `<span class="mu">${unitIcon(k, 'unit-avatar-mini')} ${esc(U(k).name)}</span>`).join('') || '（還沒有）');
     $('#dzOk').textContent = `組建（${DESIGN_FEE} 萬）`;
     $('#dzOk').disabled = S.money[S.player] < DESIGN_FEE;
   }
@@ -650,9 +736,9 @@
     const d = S.draft, f = S.player;
     if (!playerActive() || S.money[f] < DESIGN_FEE) return flash('錢不夠！');
     const spec = designUnit(d.weapon, d.armor, d.mount);
-    const name = d.name.trim() || defaultUnitName(spec);
+    const name = d.name.trim().slice(0, 8) || defaultUnitName(spec);
     createUnit(f, name, d.icon, spec);
-    log(`🛠️ 組建新兵種「${iconMarkup(d.icon, 'log-avatar')} ${name}」（${spec.parts.join('＋')}），攻${spec.atk}/血${spec.hp}`, 'me');
+    log(`🛠️ 組建新兵種「${iconMarkup(d.icon, 'log-avatar')} ${esc(name)}」（${spec.parts.join('＋')}），攻${spec.atk}/血${spec.hp}`, 'me');
     $('#designer').hidden = true;
     render();
   }
@@ -722,7 +808,7 @@
   function render() {
     if (!S.owner) return;
     const sel = S.sel;
-    const canAct = playerActive() && sel && S.owner[sel] === S.player && !S.acted.has(sel) && !stunned(sel) && count(S.army[sel]) > 0;
+    const canAct = playerActive() && sel && S.owner[sel] === S.player && !S.acted.has(sel) && !stunned(sel) && count(S.army[sel]) > 1;
     const reach = S.transferMode && playerActive() && sel ? reachable(sel) : new Set();
     for (const c of COUNTIES) {
       const id = c.id, f = S.owner[id];
@@ -744,6 +830,9 @@
     renderPanel();
     renderInfo();
     renderTip();
+    renderBattleReport();
+    $('#saveBtn').disabled = !playerActive();
+    if (playerActive()) saveCheckpoint('auto');
   }
 
   function renderPanel() {
@@ -808,14 +897,15 @@
         <div class="rbtns">${isMineSel ? `<button data-skill="${i}" ${block ? 'disabled' : ''}>${block || '發動'}</button>` : skillWait(id, i) ? `<span class="cdTag">冷卻 ${skillWait(id, i)} 天</span>` : ''}
         ${canEdit && i > 0 ? `<button class="swap" data-pick="${i}">更換</button>` : ''}</div></div>`;
     }).join('') + (status.length ? `<div class="rstatus">${status.join('　')}</div>` : '');
+    html += facilityHtml(id, isMineSel);
     if (isMineSel) {
       const acted = S.acted.has(id);
       html += `<div class="recruitHead"><b>🪖 招兵到${c.short}</b><span>💰 目前 <b>${fmtMoney(S.money[f])}</b></span></div>
         <div class="recruit">${unitsOf(f).map(k => `<button data-u="${k}" class="${U(k).owner ? 'custom' : ''}" ${S.money[f] < unitCost(k, id) || !room(id) ? 'disabled' : ''} title="${U(k).desc}">
-        ${unitIcon(k)} ${U(k).name}<br><small>${unitCost(k, id)} 萬・攻${U(k).atk}/血${U(k).hp}・${UNIT_CLASSES[U(k).cls]}</small></button>`).join('')}</div>
+        ${unitIcon(k)} ${esc(U(k).name)}<br><small>${unitCost(k, id)} 萬・攻${U(k).atk}/血${U(k).hp}・${UNIT_CLASSES[U(k).cls]}</small></button>`).join('')}</div>
         <button id="trBtn" class="trBtn ${S.transferMode ? 'on' : ''}" ${reachable(id).size ? '' : 'disabled'}>🚚 ${S.transferMode ? '點地圖上綠框的己方縣市（再按一次取消）' : reachable(id).size ? '調兵到其他己方縣市' : '調兵（還沒有其他相連的己方縣市）'}</button>
         <label class="half"><input type="checkbox" id="halfChk" ${S.sendHalf ? 'checked' : ''}> 進攻時只派一半兵力（其餘留守）</label>
-        <p class="hint">${stunned(id) ? `😵 被困住了，到第 ${S.stun[id]} 天都無法出兵` : acted ? '⛔ 這個縣市今天已經出兵過了（還能招兵、調兵）' : count(a) ? '👉 點擊<b class="hl-r">閃爍紅框</b>的相鄰敵方縣市進攻' : '先招兵才能出擊'}</p>`;
+        <p class="hint">${stunned(id) ? `😵 被困住了，到第 ${S.stun[id]} 天都無法出兵` : acted ? '⛔ 這個縣市今天已經出兵過了（還能招兵、調兵）' : count(a) > 1 ? '👉 點擊<b class="hl-r">閃爍紅框</b>的敵方縣市，配置出征部隊' : count(a) === 1 ? '至少留 1 人守家，招兵後才能出征' : '先招兵才能出擊'}</p>`;
     }
     box.innerHTML = html;
   }
@@ -861,7 +951,7 @@
     const mine = power(S.army[src], atkMult(S.player, src)) * (S.sendHalf ? 0.5 : 1);
     const theirs = power(S.army[tgt], defMult(S.owner[tgt], tgt));
     const r = theirs ? mine / theirs : 99;
-    return `<div class="odds">勝算：<b class="${r > 1.3 ? 'good' : r > 0.9 ? 'mid' : 'bad'}">${r > 1.8 ? '穩贏' : r > 1.3 ? '有利' : r > 0.9 ? '五五波' : r > 0.6 ? '不利' : '送頭'}</b></div>`;
+    return `<div class="odds">勝算：<b class="${r > 1.3 ? 'good' : r > 0.9 ? 'mid' : 'bad'}">${r > 1.8 ? '優勢大' : r > 1.3 ? '有利' : r > 0.9 ? '五五波' : r > 0.6 ? '不利' : '送頭'}</b></div>`;
   }
 
   function renderTip() {
@@ -881,6 +971,10 @@
 
   // ───────── 視窗 ─────────
   function showStart() {
+    S.menuOpen = true;
+    closeActionDialogs();
+    refreshSaveButtons();
+    $('#returnGame').hidden = !S.owner || S.mode === 'idle' || S.over;
     $('#modal').hidden = false;
     $('#startView').hidden = false;
     $('#endView').hidden = true;
@@ -901,7 +995,69 @@
     $('#watchBtn').hidden = !(S.mode === 'play' && !win && alive().length > 1);
     if (winner) $('#endTitle').style.color = byId[winner].color; else $('#endTitle').style.color = '';
   }
-  const hideModal = () => { $('#modal').hidden = true; };
+  const hideModal = () => { $('#modal').hidden = true; S.menuOpen = false; };
+
+  // Only save at a stable player turn, never a partially resolved battle/AI turn.
+  const saveRules = { counties: COUNTIES.map(c => c.id), skills: ALL_SKILLS, difficulties: DIFFICULTY,
+    baseUnits: Object.keys(UNITS), classes: UNIT_KEYS, buildings: BUILDINGS, maxCustom: MAX_CUSTOM_UNITS,
+    icons: [...UNIT_ICONS, ...Object.values(UNITS).map(u => u.icon)], sprites: Object.values(UNITS).map(u => u.sprite) };
+  let lastAuto = '', storageWarned = false;
+  function saveCheckpoint(slot, notify = false) {
+    if (!playerActive()) return false;
+    try {
+      const logs = [...$('#log').children].slice(0, 80).map(e => e.textContent.slice(0, 2000));
+      const text = GameSaves.encode(S, logs), signature = JSON.stringify(JSON.parse(text).data) + JSON.stringify(logs);
+      if (slot === 'auto' && signature === lastAuto) return true;
+      localStorage.setItem('taiwan-war:v1:' + slot, text);
+      if (slot === 'auto') lastAuto = signature;
+      $('#saveStatus').textContent = `${slot === 'auto' ? '已自動儲存' : '已手動存檔'}・第 ${S.day} 天`;
+      if (notify) flash('存檔完成，下次可從開始畫面繼續', 'good');
+      return true;
+    } catch {
+      $('#saveStatus').textContent = '無法儲存，請確認瀏覽器允許本機儲存';
+      if (notify || !storageWarned) flash('無法存檔，請確認瀏覽器允許本機儲存');
+      storageWarned = true;
+      return false;
+    }
+  }
+  function refreshSaveButtons() {
+    for (const slot of ['auto', 'manual']) {
+      const b = $('#' + slot + 'Load');
+      try {
+        const save = GameSaves.read(localStorage, slot, saveRules);
+        const s = save.data;
+        b.disabled = false;
+        b.textContent = `${slot === 'auto' ? '▶ 繼續自動存檔' : '📂 讀取手動存檔'}・${byId[s.player].short} 第 ${s.day} 天`;
+        b.title = new Date(save.savedAt).toLocaleString('zh-TW');
+      } catch {
+        b.disabled = true;
+        b.textContent = slot === 'auto' ? '尚無可用自動存檔' : '尚無可用手動存檔';
+      }
+    }
+  }
+  function loadCheckpoint(slot) {
+    try {
+      const save = GameSaves.read(localStorage, slot, saveRules);
+      ++S.gen;
+      closeActionDialogs();
+      Object.assign(S, save.data, { diff: DIFFICULTY[save.data.diffKey], gameDiffKey: save.data.diffKey, over: false, busy: false, paused: false, transferMode: false, hover: null, lastBattle: null });
+      lastAuto = '';
+      $('#log').replaceChildren();
+      for (const text of save.logs) { const div = document.createElement('div'); div.className = 'entry'; div.textContent = text; $('#log').appendChild(div); }
+      hideModal();
+      focusCounty(S.sel || owned(S.player)[0]);
+      render();
+      flash('已回到存檔時的玩家回合；稅收不會重複領取', 'good');
+    } catch {
+      flash('存檔無法讀取，目前遊戲保持原狀');
+      refreshSaveButtons();
+    }
+  }
+  $('#saveBtn').addEventListener('click', () => saveCheckpoint('manual', true));
+  $('#autoLoad').addEventListener('click', () => loadCheckpoint('auto'));
+  $('#manualLoad').addEventListener('click', () => loadCheckpoint('manual'));
+  $('#returnGame').addEventListener('click', () => { hideModal(); render(); });
+  window.addEventListener('pagehide', () => saveCheckpoint('auto'));
 
   // ───────── 事件綁定 ─────────
   $('#pickGrid').addEventListener('click', e => { const b = e.target.closest('.pickBtn'); if (b) newGame('play', b.dataset.id); });
@@ -930,6 +1086,11 @@
     document.querySelectorAll('#speed button').forEach(x => x.classList.toggle('on', x === b));
   });
   $('#info').addEventListener('click', e => {
+    const build = e.target.closest('button[data-build]');
+    if (build && playerActive() && S.owner[S.sel] === S.player) { buildFacility(S.sel, build.dataset.build); render(); }
+    if (e.target.closest('#demolishBtn') && playerActive() && S.owner[S.sel] === S.player) {
+      if (confirm('確定拆除目前設施？不會退還建造費。')) { S.buildings[S.sel] = null; render(); }
+    }
     const b = e.target.closest('button[data-u]');
     if (b) recruit(b.dataset.u);
     if (e.target.closest('#trBtn')) { S.transferMode = !S.transferMode; render(); }
@@ -941,7 +1102,14 @@
   $('#info').addEventListener('change', e => { if (e.target.id === 'halfChk') { S.sendHalf = e.target.checked; renderInfo(); } });
   $('#research').addEventListener('click', e => { const b = e.target.closest('button[data-k]'); if (b) doResearch(b.dataset.k); });
   document.addEventListener('keydown', e => {
-    if (!$('#modal').hidden || !$('#designer').hidden || !$('#transfer').hidden || !$('#skillPicker').hidden || e.target.tagName === 'INPUT') return;
+    if (e.key === 'Tab' && !$('#attackDialog').hidden) {
+      const controls = [...$('#attackDialog').querySelectorAll('button:not(:disabled)')];
+      const first = controls[0], last = controls[controls.length - 1];
+      if (e.shiftKey && document.activeElement === first) { e.preventDefault(); last.focus(); }
+      else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first.focus(); }
+    }
+    if (e.key === 'Escape' && !$('#attackDialog').hidden) { $('#attackCancel').click(); return; }
+    if (!$('#attackDialog').hidden || !$('#modal').hidden || !$('#designer').hidden || !$('#transfer').hidden || !$('#skillPicker').hidden || e.target.tagName === 'INPUT') return;
     if (e.key === 'Enter' || e.key === 'e') endPlayerTurn();
     if (e.key === 'Escape') { S.sel = null; S.transferMode = false; render(); }
   });
@@ -958,3 +1126,4 @@
   render();
   showStart();
 })();
+
