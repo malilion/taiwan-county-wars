@@ -71,6 +71,27 @@
   const esc = text => String(text).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 
   const S = { gen: 0, speed: 1, paused: false, over: true, hover: null, diffKey: 'easy' };
+  // ⚡ 略過戰鬥音；玩家自己的攻陷、守住、新聞仍出聲。按鈕音不受速度影響。
+  function sfx(name, playerEvent = false) {
+    if (typeof Sfx === 'undefined') return;
+    if (S.speed >= 99 && name !== 'click' && name !== 'end') {
+      if (!(playerEvent && (name === 'capture' || name === 'hold' || name === 'news'))) return;
+    }
+    try { Sfx.play(name); } catch { /* 音效失敗就略過 */ }
+  }
+  function syncSfxBtn() {
+    const btn = $('#sfxBtn');
+    const off = typeof Sfx === 'undefined' || Sfx.muted();
+    btn.textContent = off ? '🔇' : '🔊';
+    const label = off ? '音效：關' : '音效：開';
+    btn.title = label;
+    btn.setAttribute('aria-label', label);
+  }
+  function toggleSfx() {
+    if (typeof Sfx === 'undefined') return;
+    Sfx.toggle();
+    syncSfxBtn();
+  }
   const map = buildMap($('#map'), onCountyClick, id => { S.hover = id; if (!S.sel) renderInfo(); renderTip(); });
 
   // ───────── 狀態查詢 ─────────
@@ -233,6 +254,7 @@
       endPlayerTurn();
       return;
     }
+    sfx('click');
     const btn = $('#endTurn');
     const ready = owned(S.player).filter(id => !S.acted.has(id) && !stunned(id) && count(freshArmy(id)) > 1).length;
     const token = {};
@@ -246,6 +268,7 @@
 
   function endPlayerTurn() {
     if (!playerActive()) return;
+    sfx('end');
     cancelEndTurnConfirm(false);
     saveCheckpoint('auto');
     const gen = S.gen;
@@ -290,7 +313,10 @@
       if (gen !== S.gen || S.over) return;
       await finishBattle(r, gen);
       if (gen !== S.gen || S.over) return;
-    } else r = Combat.resolve(options);
+    } else {
+      r = Combat.resolve(options);
+      if (fa === S.player || fd === S.player) sfx(r.win ? 'capture' : 'hold', true);
+    }
     if (fa === S.player || fd === S.player) S.lastBattle = { src, tgt, fa, fd, sent: count(sent), defenders: count(S.army[tgt]), ...r };
     if (S.buff[src]) delete S.buff[src].atk; // 進攻加成用掉了
     clearArrows();
@@ -422,7 +448,10 @@
       if (gen !== S.gen || S.over) return;
       await finishBattle(r, gen);
       if (gen !== S.gen || S.over) return;
-    } else r = Combat.resolve(options);
+    } else {
+      r = Combat.resolve(options);
+      sfx(r.win ? 'capture' : 'hold', true);
+    }
     S.invasion.sites[site] = r.D;
     if (S.buff[src]) delete S.buff[src].atk;
     // Expeditions return to port instead of occupying an off-map base.
@@ -467,7 +496,10 @@
       await finishBattle(r, gen);
       if (gen !== S.gen) return;
       S.busy = false;
-    } else r = Combat.resolve(options);
+    } else {
+      r = Combat.resolve(options);
+      sfx(r.win ? 'capture' : 'hold', true);
+    }
     S.army[port] = r.D;
     clampMoved(port);
     const damage = r.win ? 18 : 4;
@@ -948,12 +980,14 @@
     const { src, tgt, sent, kind } = S.attack;
     if (kind === 'invasion') {
       if (!expeditionAllowed(src, tgt) || !Combat.validDeployment(freshArmy(src), sent, S.units)) return;
+      sfx('click');
       $('#attackDialog').hidden = true;
       S.attack = null;
       await doExpedition(src, tgt, sent, S.gen);
       return;
     }
     if (S.owner[src] !== S.player || S.owner[tgt] === S.player || S.acted.has(src) || stunned(src) || !Combat.validDeployment(freshArmy(src), sent, S.units)) return;
+    sfx('click');
     $('#attackDialog').hidden = true;
     S.attack = null;
     S.busy = true;
@@ -1054,7 +1088,7 @@
     }
     if (moved) markMoved(to, moving);
     $('#transfer').hidden = true;
-    if (moved) log(`🚚 從 ${cTag(from)} 調 ${moved} 兵到 ${cTag(to)}`, 'me');
+    if (moved) { sfx('click'); log(`🚚 從 ${cTag(from)} 調 ${moved} 兵到 ${cTag(to)}`, 'me'); }
     else if (asked) flash(!count(freshArmy(from)) && count(S.army[from]) > 1 ? '已行動的部隊今天不能再調動' : !room(to) ? `${byId[to].short}已滿 ${MAX_TROOPS} 人` : '至少留 1 人守家');
     S.sel = to;
     render();
@@ -1074,6 +1108,7 @@
     S.money[S.player] -= cost;
     clampMoved(id);
     addUnits(S.army[id], k, 1);
+    sfx('click');
     flash(`${esc(U(k).name)} +1　💰 -${cost} 萬（剩 ${fmtMoney(S.money[S.player])}）`, 'good');
     render();
   }
@@ -1242,6 +1277,7 @@
     $('#bsFloat').hidden = true;
     renderTacticBtn();
     $('#bsSkip').focus();
+    sfx('attack');
     await battleSleep(1400, gen);
     while (!st.done && !BV.retreat && gen === S.gen) {
       if (BV.skip) { while (!st.done) Combat.step(st, options); break; }
@@ -1249,6 +1285,9 @@
       Combat.step(st, options);
       BV.step = st.round;
       drawBattle(st.round);
+      sfx('attack');
+      const snap = st.rounds[st.round];
+      if (snap && (Object.values(snap.toA || {}).some(n => n > 0) || Object.values(snap.toD || {}).some(n => n > 0))) sfx('hit');
       await battleSleep(1100, gen);
     }
     if (gen !== S.gen) return null;
@@ -1261,6 +1300,7 @@
     $('#bsStamp').className = `bsStamp ${cls}`;
     $('#bsStamp').innerHTML = `<b>${text}</b><small>攻方折損 ${r.lostA} 人・守方折損 ${r.lostD} 人</small>`;
     $('#bsStamp').hidden = false;
+    if (BV.view?.att?.mine || BV.view?.def?.mine) sfx(r.win ? 'capture' : 'hold', true);
     $('#bsSkip').disabled = true;
     $('#bsRetreat').hidden = true;
     $('#bsTacticMenu').hidden = true;
@@ -1318,6 +1358,7 @@
     el.classList.remove('show');
     void el.offsetWidth;
     el.classList.add('show');
+    sfx('tactic');
   }
   function castTactic(key) {
     if (!BV.open || !BV.side || !BV.st || BV.st.done || !tacticUnlocked(key, S.research[S.player])) return false;
@@ -1554,6 +1595,8 @@
     if (!news.length) return;
     const headline = elims.length ? elims.map(n => `${byId[n.f].short}滅亡`).join('、') : `${caps.length} 座縣市易主`;
     log(`📺 第 ${day} 天晚間新聞：${headline}${elims.length && caps.length ? `；另有 ${caps.length} 座縣市易主` : ''}`, 'event');
+    const playerNews = news.some(n => n.fa === S.player || n.fd === S.player || n.f === S.player || n.by === S.player);
+    sfx('news', playerNews);
     if (S.speed >= 99) return;
     const capLine = n => `<li><span class="sw" style="background:${byId[n.fa].color}"></span><b>${byId[n.fa].short}</b> 攻下 <b>${byId[n.tgt].name}</b>${n.fd !== n.tgt ? `<small>（原屬${byId[n.fd].short}）</small>` : ''}${n.fa === S.player ? '<em>你</em>' : n.fd === S.player ? '<em class="bad">你失守</em>' : ''}</li>`;
     $('#newsTitle').textContent = `第 ${day} 天晚間新聞`;
@@ -1612,6 +1655,7 @@
     div.innerHTML = html;
     box.prepend(div);
     while (box.children.length > 120) box.lastChild.remove();
+    if (String(cls).split(/\s+/).includes('big')) sfx('news', !!(S.player && (String(html).includes(byId[S.player].short) || String(html).includes('你'))));
   }
 
   // ───────── 繪製 ─────────
@@ -1904,6 +1948,7 @@
     (async () => { await nextTurn(gen); runLoop(gen); })();
   });
   $('#endTurn').addEventListener('click', requestEndTurn);
+  $('#sfxBtn').addEventListener('click', toggleSfx);
   $('#pauseBtn').addEventListener('click', () => { S.paused = !S.paused; renderPanel(); });
   $('#speed').addEventListener('click', e => {
     const b = e.target.closest('button');
@@ -1930,6 +1975,13 @@
   $('#info').addEventListener('change', e => { if (e.target.id === 'halfChk') { cancelEndTurnConfirm(); S.sendHalf = e.target.checked; renderInfo(); } });
   $('#research').addEventListener('click', e => { const b = e.target.closest('button[data-k]'); if (b) doResearch(b.dataset.k); });
   document.addEventListener('keydown', e => {
+    if ((e.key === 'm' || e.key === 'M') && !e.repeat) {
+      const tag = e.target?.tagName;
+      const typing = tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || e.target?.isContentEditable;
+      const dialog = !$('#attackDialog').hidden || !$('#modal').hidden || !$('#designer').hidden || !$('#transfer').hidden || !$('#skillPicker').hidden;
+      // 戰鬥畫面沒有用到 m，對話框與文字欄位有焦點時不搶快捷鍵
+      if (!typing && !dialog) { e.preventDefault(); toggleSfx(); }
+    }
     if (e.key === 'Tab' && !$('#attackDialog').hidden) {
       const controls = [...$('#attackDialog').querySelectorAll('button:not(:disabled)')];
       const first = controls[0], last = controls[controls.length - 1];
@@ -1960,5 +2012,6 @@
   S.over = true;
   render();
   showStart();
+  syncSfxBtn();
 })();
 
