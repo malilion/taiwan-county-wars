@@ -75,13 +75,10 @@
       S.aggr[c.id] = rand(1.15, 1.7);
     });
     S.order = shuffle(COUNTIES.map(c => c.id));
-    // 玩家的技能欄：老家 = 自己的技能 + 1 個額外欄位；每佔領一個縣市 = 1 個可設定的欄位
+    // 每個縣市兩個技能欄：[固有技能, 自訂技能]；AI 縣市開局就挑好，玩家的老家等玩家自己設定
+    S.library = new Set(Object.keys(COMMON_SKILLS)); // 舊存檔格式相容用，自訂技能固定 10 種
     S.slots = {};
-    S.library = new Set();
-    if (player) {
-      S.slots[player] = [player, null];
-      S.library = new Set([player, ...Object.keys(COMMON_SKILLS)]);
-    }
+    COUNTIES.forEach(c => claimSlots(c.id));
   }
 
   function newGame(mode, player) {
@@ -575,19 +572,21 @@
   }
 
   // ───────── 地域技能 ─────────
-  // 技能欄：第 0 欄固定是縣市固有技能（不能換）；玩家的老家和每個佔領的縣市多 1 個自訂欄（S.slots[id][1]）
-  // AI 的縣市只有固有技能
-  // 技能 key = 技能原本所屬的縣市 id（REGION_SKILLS 的 key）；冷卻以「縣市:欄位」計算，換技能也不會重置冷卻
-  const slotsOf = id => S.owner[id] === S.player && S.slots[id] ? S.slots[id] : [id];
+  // 技能欄：每個縣市 [固有技能（不能換）, 自訂技能（10 選 1）]
+  // 自訂技能設定後鎖定，縣市易主時清空、由新主人重新設定；冷卻以「縣市:欄位」計算
+  const slotsOf = id => S.slots[id] || [id, null];
   const cdKey = (id, i) => `${id}:${i}`;
   const skillWait = (id, i) => Math.max(0, (S.skillReady[cdKey(id, i)] || 0) - S.day); // 還要等幾天
   const HOSTILE = ['strike', 'storm', 'stun'];
-  // 佔領縣市時：玩家拿到的縣市開一個技能欄（預設是當地技能）並解鎖到技能庫；被別人拿走就恢復原狀
+  // 縣市易主（或開局）：自訂技能清空；玩家的縣市等玩家設定，AI 直接挑一個
   function claimSlots(id) {
-    if (S.owner[id] !== S.player) { delete S.slots[id]; return; }
-    if (!S.library.has(id)) log(`📜 解鎖地域技能「${REGION_SKILLS[id].icon} ${REGION_SKILLS[id].name}」，可以裝到任何己方縣市的技能欄`, 'me');
-    S.library.add(id);
-    S.slots[id] = [id, null];
+    S.slots[id] = [id, S.owner[id] === S.player ? null : aiPickSkill(id)];
+  }
+  function aiPickSkill(id) {
+    const front = isFront(id), keys = Object.keys(COMMON_SKILLS);
+    // 後方縣市挑經濟、徵兵類；前線什麼都可能
+    const pool = front ? keys : keys.filter(k => !HOSTILE.includes(COMMON_SKILLS[k].type) && COMMON_SKILLS[k].type !== 'again');
+    return pick(pool);
   }
   // 和平期內不能對受保護的對象使用攻擊型技能
   function hostileTargets(id) {
@@ -635,43 +634,45 @@
     return true;
   }
 
-  // 技能設定視窗
-  function openSkillPicker(id, i) {
+  // 技能設定視窗：只有自己縣市「空著」的自訂欄可以設定
+  const canSetSkill = id => S.mode === 'play' && !S.over && S.owner[id] === S.player && !slotsOf(id)[1];
+  function openSkillPicker(id, i = 1, captured = false) {
+    if (i !== 1 || !canSetSkill(id)) return false;
     S.picker = { id, i };
-    const cur = S.slots[id][i];
-    const used = S.slots[id].filter((k, j) => k && j !== i);
-    $('#spTitle').innerHTML = `📜 設定 ${cTag(id)} 的自訂技能欄`;
-    $('#spList').innerHTML = [...S.library].map(k => {
-      const sk = ALL_SKILLS[k];
-      const dup = used.includes(k);
-      return `<button class="spItem ${k === cur ? 'on' : ''}" data-key="${k}" ${dup ? 'disabled' : ''}>
-        <span class="ricon">${sk.icon}</span><span><b>${sk.name}</b><small>${sk.desc}・冷卻 ${sk.cd} 天・${byId[k] ? `來自${byId[k].short}` : '通用技能'}${dup ? '（這個縣市已裝備）' : ''}</small></span></button>`;
-    }).join('');
-    $('#spHint').textContent = `技能庫 ${S.library.size} 個（含 ${Object.keys(COMMON_SKILLS).length} 個通用技能）：佔領新的縣市就能解鎖它的地域技能。換技能不會重置這一欄的冷卻。`;
+    $('#spTitle').innerHTML = captured ? `🚩 攻下 ${cTag(id)}！設定它的自訂技能` : `📜 設定 ${cTag(id)} 的自訂技能`;
+    $('#spList').innerHTML = Object.entries(COMMON_SKILLS).map(([k, sk]) => `<button class="spItem" data-key="${k}">
+        <span class="ricon">${sk.icon}</span><span><b>${sk.name}</b><small>${sk.desc}・冷卻 ${sk.cd} 天</small></span></button>`).join('');
+    $('#spHint').textContent = `固有技能「${REGION_SKILLS[id].icon} ${REGION_SKILLS[id].name}」不能換；自訂技能從 10 種裡選 1 種。設定後鎖定，要等這個縣市易主、被你重新佔領時才能重新設定。`;
     $('#skillPicker').hidden = false;
+    return true;
   }
   $('#spList').addEventListener('click', e => {
     const b = e.target.closest('button[data-key]');
-    if (!b || !S.picker) return;
+    if (!b || !S.picker || !Object.hasOwn(COMMON_SKILLS, b.dataset.key)) return;
     const { id, i } = S.picker;
+    S.picker = null;
+    if (!canSetSkill(id)) { $('#skillPicker').hidden = true; return; }
     S.slots[id][i] = b.dataset.key;
     $('#skillPicker').hidden = true;
     log(`📜 ${cTag(id)} 的技能欄裝上「${ALL_SKILLS[b.dataset.key].icon} ${ALL_SKILLS[b.dataset.key].name}」`, 'me');
     render();
   });
-  $('#spCancel').addEventListener('click', () => { $('#skillPicker').hidden = true; });
+  $('#spCancel').addEventListener('click', () => { $('#skillPicker').hidden = true; S.picker = null; });
 
   function aiUseSkills(f) {
     for (const id of owned(f)) {
-      const sk = REGION_SKILLS[id];
-      if (sk.type === 'again' || skillBlock(id, 0)) continue;
-      const front = isFront(id);
-      const threat = front ? Math.max(...enemiesOf(id).map(e => power(S.army[e]))) : 0;
-      const use = sk.type === 'money' || sk.type === 'recruit'
-        || (sk.type === 'atk' && front)
-        || (sk.type === 'def' && threat > power(S.army[id]) * 0.8)
-        || HOSTILE.includes(sk.type);
-      if (use) useSkill(id, 0);
+      if (!slotsOf(id)[1]) claimSlots(id); // 讀舊存檔時 AI 縣市可能還沒挑
+      slotsOf(id).forEach((key, i) => {
+        const sk = ALL_SKILLS[key];
+        if (sk.type === 'again' || skillBlock(id, i)) return;
+        const front = isFront(id);
+        const threat = front ? Math.max(...enemiesOf(id).map(e => power(S.army[e]))) : 0;
+        const use = sk.type === 'money' || sk.type === 'recruit'
+          || (sk.type === 'atk' && front)
+          || (sk.type === 'def' && threat > power(S.army[id]) * 0.8)
+          || HOSTILE.includes(sk.type);
+        if (use) useSkill(id, i);
+      });
     }
   }
 
@@ -815,6 +816,7 @@
     S.busy = false;
     S.sel = S.owner[tgt] === S.player ? tgt : src;
     render();
+    if (S.owner[tgt] === S.player) openSkillPicker(tgt, 1, true);
   });
   function renderBattleReport() {
     const box = $('#battleReport'), r = S.lastBattle;
@@ -1356,15 +1358,14 @@
       defBuff(id) > 1 ? `🛡️ 防禦 ×${defBuff(id)}（到第 ${S.buff[id].defUntil} 天）` : '',
       stunned(id) ? `😵 無法出兵（到第 ${S.stun[id]} 天）` : '',
     ].filter(Boolean);
-    const canEdit = isMineSel && S.slots[id];
+    const canEdit = isMineSel && canSetSkill(id);
     html += slotsOf(id).map((key, i) => {
-      const label = i === 0 ? '固有技能' : '自訂技能欄';
-      if (!key) return `<div class="rskill empty"><span class="ricon">➕</span><div class="rtext"><b>${label}（空）</b><small>${canEdit ? '從技能庫挑一個技能裝上' : '尚未設定'}</small></div>
+      const label = i === 0 ? '固有技能' : '自訂技能';
+      if (!key) return `<div class="rskill empty"><span class="ricon">➕</span><div class="rtext"><b>${label}（空）</b><small>${canEdit ? '從 10 種自訂技能挑一個，設定後鎖定到縣市易主' : '尚未設定'}</small></div>
         ${canEdit ? `<button data-pick="${i}">設定</button>` : ''}</div>`;
       const sk = ALL_SKILLS[key], block = skillBlock(id, i);
-      return `<div class="rskill"><span class="ricon">${sk.icon}</span><div class="rtext"><b>${label}：${sk.name}${key !== id ? `<em>（${byId[key] ? `來自${byId[key].short}` : '通用'}）</em>` : ''}</b><small>${sk.desc}（冷卻 ${sk.cd} 天）</small></div>
-        <div class="rbtns">${isMineSel ? `<button data-skill="${i}" ${block ? 'disabled' : ''}>${block || '發動'}</button>` : skillWait(id, i) ? `<span class="cdTag">冷卻 ${skillWait(id, i)} 天</span>` : ''}
-        ${canEdit && i > 0 ? `<button class="swap" data-pick="${i}">更換</button>` : ''}</div></div>`;
+      return `<div class="rskill"><span class="ricon">${sk.icon}</span><div class="rtext"><b>${label}：${sk.name}${i ? '<em>（易主時重新設定）</em>' : ''}</b><small>${sk.desc}（冷卻 ${sk.cd} 天）</small></div>
+        <div class="rbtns">${isMineSel ? `<button data-skill="${i}" ${block ? 'disabled' : ''}>${block || '發動'}</button>` : skillWait(id, i) ? `<span class="cdTag">冷卻 ${skillWait(id, i)} 天</span>` : ''}</div></div>`;
     }).join('') + (status.length ? `<div class="rstatus">${status.join('　')}</div>` : '');
     html += defenseHtml(id, isMineSel);
     html += facilityHtml(id, isMineSel);
@@ -1472,7 +1473,7 @@
 
   // Only save at a stable player turn, never a partially resolved battle/AI turn.
   const saveRules = { counties: COUNTIES.map(c => c.id), skills: ALL_SKILLS, difficulties: DIFFICULTY,
-    enemyUnits: Invasion.UNITS, validateInvasion: Invasion.validate, baseUnits: Object.keys(UNITS), classes: UNIT_KEYS, buildings: BUILDINGS, maxCustom: MAX_CUSTOM_UNITS,
+    enemyUnits: Invasion.UNITS, customSkills: COMMON_SKILLS, validateInvasion: Invasion.validate, baseUnits: Object.keys(UNITS), classes: UNIT_KEYS, buildings: BUILDINGS, maxCustom: MAX_CUSTOM_UNITS,
     icons: [...UNIT_ICONS, ...Object.values({ ...UNITS, ...Invasion.UNITS }).map(u => u.icon)], sprites: Object.values(UNITS).map(u => u.sprite) };
   let lastAuto = '', storageWarned = false;
   function saveCheckpoint(slot, notify = false) {
@@ -1574,7 +1575,7 @@
     const sb = e.target.closest('button[data-skill]');
     if (sb && playerActive() && S.owner[S.sel] === S.player) { useSkill(S.sel, +sb.dataset.skill); render(); }
     const pb = e.target.closest('button[data-pick]');
-    if (pb && playerActive() && S.slots[S.sel] && +pb.dataset.pick > 0) openSkillPicker(S.sel, +pb.dataset.pick);
+    if (pb && playerActive()) openSkillPicker(S.sel, +pb.dataset.pick);
   });
   $('#info').addEventListener('change', e => { if (e.target.id === 'halfChk') { S.sendHalf = e.target.checked; renderInfo(); } });
   $('#research').addEventListener('click', e => { const b = e.target.closest('button[data-k]'); if (b) doResearch(b.dataset.k); });
