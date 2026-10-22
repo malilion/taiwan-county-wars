@@ -503,7 +503,10 @@ button:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
 }
 .clash .left .bsUnit { animation: bs-lunge-r .5s ease-in-out var(--d) both; }
 .clash .right .bsUnit { animation: bs-lunge-l .5s ease-in-out var(--d) both; }
-.clash .bsUnit.hit .bsSprite, .clash .bsUnit.hit > * { animation: bs-hit .45s steps(2) calc(var(--d) + .25s) 2; }
+.clash .bsUnit.hit .bsFace { animation: bs-hit .45s steps(2) calc(var(--d) + .25s) 2; }
+/* 面對面：右方（或面向左的圖在左方）水平翻轉 */
+.bsFace { display: grid; place-items: center; width: 100%; height: 100%; }
+.bsCols.right .bsFace:not(.faceL), .bsCols.left .bsFace.faceL { transform: scaleX(-1); }
 .clash .left .bsUnit.dying { animation: bs-lunge-r .5s ease-in-out var(--d), bs-die .5s ease-in calc(var(--d) + .55s) forwards; }
 .clash .right .bsUnit.dying { animation: bs-lunge-l .5s ease-in-out var(--d), bs-die .5s ease-in calc(var(--d) + .55s) forwards; }
 .bsGap { display: grid; align-content: center; justify-items: center; gap: 18px; font-size: 22px; line-height: 1; width: 30px; flex: none; }
@@ -538,7 +541,7 @@ button:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
 .bsRetreat[hidden], .bsFoot #bsDone[hidden] { display: none; }
 @keyframes bs-lunge-r { 50% { transform: translateX(10px); } }
 @keyframes bs-lunge-l { 50% { transform: translateX(-10px); } }
-@keyframes bs-hit { 50% { filter: brightness(2.2) sepia(1) hue-rotate(-40deg) saturate(6); transform: translateX(2px); } }
+@keyframes bs-hit { 50% { filter: brightness(2.2) sepia(1) hue-rotate(-40deg) saturate(6); } }
 @keyframes bs-die { to { opacity: 0; transform: translateY(10px) rotate(70deg) scale(.6); } }
 @keyframes bs-dmg { 0% { opacity: 0; transform: translateY(6px) scale(.6); } 25% { opacity: 1; transform: translateY(-4px) scale(1.15); } 100% { opacity: 0; transform: translateY(-18px); } }
 @keyframes bs-bolt { 0% { opacity: 0; transform: scale(.4) rotate(-20deg); } 40% { opacity: 1; transform: scale(1.2); } 100% { opacity: 0; transform: scale(1) rotate(10deg); } }

@@ -991,6 +991,8 @@
   const watchBattle = (fa, fd) => S.mode === 'play' && S.speed < 99 && (fa === S.player || fd === S.player);
   const emblemOf = id => byId[id].portrait ? `<img src="${byId[id].portrait}" alt="">` : byId[id].short.slice(0, 1);
   const SHOW_PER_ROW = 8; // 一排最多畫 8 個，其餘用數字表示
+  // 角色圖大多面向右（或正面）；面向左的列在這裡。戰場上左方面向右、右方面向左，雙方面對面
+  const FACE_LEFT = new Set(['assets/units/icons/13-fish.webp']);
   async function battleSleep(ms, gen) {
     await new Promise(r => { BV.wake = r; setTimeout(r, ms / S.speed / BV.fast); });
     BV.wake = null;
@@ -1000,9 +1002,10 @@
   function battleCol(k, n, left, dmg, round) {
     if (!k || !n) return '<div class="bsColUnits"></div>';
     const shown = Math.min(n, SHOW_PER_ROW), dead = Math.min(shown, n - left), out = [];
+    const face = FACE_LEFT.has(U(k).sprite || U(k).icon) ? ' faceL' : '';
     for (let j = 0; j < shown; j++) {
       const dying = j >= shown - dead, hit = dmg > 0 && (dying || (j * 7 + round) % 3 === 0);
-      out.push(`<span class="bsUnit${hit ? ' hit' : ''}${dying ? ' dying' : ''}" style="--d:${j % 5 * 70}ms">${unitIcon(k, 'bsSprite')}</span>`);
+      out.push(`<span class="bsUnit${hit ? ' hit' : ''}${dying ? ' dying' : ''}" style="--d:${j % 5 * 70}ms"><span class="bsFace${face}">${unitIcon(k, 'bsSprite')}</span></span>`);
     }
     return `<div class="bsColUnits">${out.join('')}</div><span class="bsCount">${esc(U(k).name)}<br>×${left}</span>`
       + (dmg > 0 ? `<em class="bsDmg">${Math.max(1, Math.round(dmg))}</em>` : '');
