@@ -19,6 +19,18 @@ const Combat = (() => {
       && count(sent) > 0 && count(sent) < count(army);
   }
 
+  // Allocate an exact total proportionally from the deployable army.
+  function planSize(army, units, requested) {
+    const pool = plan(army, units), capacity = count(pool);
+    const total = Math.max(0, Math.min(capacity, Number.isFinite(Number(requested)) ? Math.floor(Number(requested)) : 0));
+    if (!capacity) return {};
+    const sent = Object.fromEntries(kinds(pool).map(k => [k, Math.floor(pool[k] * total / capacity)]));
+    const ranked = kinds(pool).sort((a, b) => (pool[b] * total / capacity % 1) - (pool[a] * total / capacity % 1));
+    let remaining = total - count(sent);
+    for (const k of ranked) if (remaining > 0 && sent[k] < pool[k]) { sent[k]++; remaining--; }
+    return sent;
+  }
+
   function resolve({ sent, defenders, units, counters, attackMult, defenseMult, defenderAttack, attackerMoto = 1, defenderMoto = 1 }, random = Math.random) {
     const A = { ...sent }, D = { ...defenders };
     const a0 = count(A), d0 = count(D);
@@ -59,6 +71,6 @@ const Combat = (() => {
     }
     return { chance: Math.round(wins / trials * 100), lostA: Math.round(lostA / trials), lostD: Math.round(lostD / trials) };
   }
-  return { plan, validDeployment, resolve, estimate, count };
+  return { plan, planSize, validDeployment, resolve, estimate, count };
 })();
 if (typeof module !== 'undefined') module.exports = Combat;
