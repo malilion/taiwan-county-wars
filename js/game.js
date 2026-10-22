@@ -176,7 +176,8 @@
     return { sent, defenders: S.army[tgt], units: S.units, counters: COUNTERS,
       attackMult: atkMult(fa, src), defenseMult: defMult(fd, tgt),
       defenderAttack: 1 + 0.12 * S.research[fd].atk,
-      attackerMoto: byId[src].moto || 1, defenderMoto: byId[tgt].moto || 1 };
+      attackerMoto: byId[src].moto || 1, defenderMoto: byId[tgt].moto || 1,
+      adapt: fd === S.player ? 'A' : 'D' }; // AI 那一方每合重新排兵（玩家守城時是攻方 AI，否則守方）
   }
 
   async function doAttack(src, tgt, gen, half = false, deployment = null) {
@@ -305,7 +306,7 @@
   function expeditionOptions(src, site, sent) {
     return { sent, defenders: S.invasion.sites[site], units: S.units, counters: COUNTERS,
       attackMult: atkMult(S.player, src), defenseMult: site === 'core' ? 1.25 : 1,
-      defenderAttack: site === 'core' ? 1.2 : 1, attackerMoto: byId[src].moto || 1 };
+      defenderAttack: site === 'core' ? 1.2 : 1, attackerMoto: byId[src].moto || 1, adapt: 'D' };
   }
   async function doExpedition(src, site, sent, gen) {
     if (gen !== S.gen || !expeditionAllowed(src, site) || !Combat.validDeployment(S.army[src], sent, S.units)) return;
@@ -353,7 +354,7 @@
     const port = pick(Invasion.PORTS);
     const options = { sent: Invasion.wave(S.invasion), defenders: S.army[port], units: S.units,
       counters: COUNTERS, attackMult: 1.1, defenseMult: defMult(S.player, port),
-      defenderAttack: 1 + 0.12 * S.research[S.player].atk, defenderMoto: byId[port].moto || 1 };
+      defenderAttack: 1 + 0.12 * S.research[S.player].atk, defenderMoto: byId[port].moto || 1, adapt: 'A' };
     let r;
     if (watchBattle('invader', S.player)) {
       // 播放期間鎖住操作與自動存檔，空襲結算前不能出兵或存檔
@@ -1029,16 +1030,21 @@
     const def = { role: 'def', side: view.def, key: 'D', lanes: st.laneD, dmg: clash ? after.toD : {} };
     const [left, right] = flip ? [def, att] : [att, def];
     const mine = left.side.mine && !final && !st.done;
-    $('#bsTimer').innerHTML = `⏳ <b>${final ? '結算' : i ? `第 ${i} 合` : '對峙'}</b>`;
+    const myAims = left.key === 'A' ? st.aimA : st.aimD;
+    $('#bsTimer').innerHTML = `⏳ <b>${final ? '結算' : i ? `第 ${i} 合` : '對峙'}</b>${!final && st.adapted && st.adapted === i ? '<small> 敵方換排！</small>' : ''}`;
     $('#bsSides').innerHTML = bsSide('left', left.role, left.side, after[left.key], start[left.key]) + '<span class="bsVs">VS</span>'
       + bsSide('right', right.role, right.side, after[right.key], start[right.key]);
     $('#bsField').className = 'bsField' + (clash ? ' clash' : '') + (flip ? ' flip' : '');
+    const selKind = left.lanes[BV.sel];
     const cols = (side, round, isLeft) => side.lanes.map((k, lane) => {
-      const foe = (isLeft ? right : left).lanes[lane];
-      const alive = (after[side.key][k] || 0) > 0 && (after[(isLeft ? right : left).key][foe] || 0) > 0;
+      const other = isLeft ? right : left, aimed = isLeft && myAims[k] && (after[other.key][myAims[k]] || 0) > 0 ? myAims[k] : null;
+      const foe = aimed || other.lanes[lane];
+      const alive = (after[side.key][k] || 0) > 0 && (after[other.key][foe] || 0) > 0;
       const badge = isLeft && !final && alive ? matchup(k, foe) : '';
-      return `<div class="bsCol${isLeft && mine && lane === BV.sel ? ' sel' : ''}" data-lane="${isLeft ? lane : ''}">
-        <span class="bsColHead">第 ${lane + 1} 排${badge}</span>
+      const aimTag = aimed ? `<b class="bsAim">🎯 第 ${other.lanes.indexOf(aimed) + 1} 排</b>` : '';
+      const targeted = !isLeft && mine && k && selKind && myAims[selKind] === k ? ' targeted' : '';
+      return `<div class="bsCol${isLeft && mine && lane === BV.sel ? ' sel' : ''}${targeted}" ${isLeft ? `data-lane="${lane}"` : `data-foe="${k || ''}"`}>
+        <span class="bsColHead">第 ${lane + 1} 排${badge}${aimTag}</span>
         ${battleCol(k, before[side.key][k] || 0, after[side.key][k] || 0, side.dmg[k] || 0, round)}</div>`;
     }).join('');
     const gap = `<div class="bsGap">${clash ? '<i>⚡</i><i>⚡</i><i>⚡</i>' : ''}</div>`, wall = `<div class="bsWall" style="--c:${view.def.color}"></div>`;
@@ -1116,6 +1122,15 @@
     BV.sel = lane;
     drawBattle(BV.step, null, true);
   }
+  // 指定攻擊目標：選好我方一排後，點敵方任一排（例如最後一排）；再點一次取消
+  function aimRow(foeKind) {
+    const { st } = BV;
+    if (!BV.open || !BV.side || !st || st.done || !foeKind) return false;
+    const kind = (BV.side === 'A' ? st.laneA : st.laneD)[BV.sel];
+    if (!kind || !Combat.aim(st, BV.side, kind, foeKind)) return false;
+    drawBattle(BV.step, null, true);
+    return true;
+  }
   function skipBattle() { BV.skip = true; BV.wake?.(); }
   function toggleBattlePause() { BV.paused = !BV.paused; renderBattleCtrls(); }
   $('#bsSkip').addEventListener('click', skipBattle);
@@ -1124,7 +1139,11 @@
   $('#bsFast').addEventListener('click', () => { BV.fast = BV.fast >= 4 ? 1 : BV.fast * 2; renderBattleCtrls(); });
   $('#bsFwd').addEventListener('click', () => moveRow(-1));
   $('#bsBack').addEventListener('click', () => moveRow(1));
-  $('#bsField').addEventListener('click', e => { const lane = e.target.closest?.('[data-lane]'); if (lane) selectRow(Number(lane.dataset.lane)); });
+  $('#bsField').addEventListener('click', e => {
+    const lane = e.target.closest?.('[data-lane]'), foe = e.target.closest?.('[data-foe]');
+    if (lane) selectRow(Number(lane.dataset.lane));
+    else if (foe) aimRow(foe.dataset.foe);
+  });
   $('#bsRetreat').addEventListener('click', () => {
     if (!BV.open || !BV.view?.canRetreat || $('#bsRetreat').disabled) return;
     BV.retreat = true;

@@ -58,7 +58,8 @@ const Combat = (() => {
     const laneD = kinds(D).sort(byClass(units));
     const laneA = counterLanes(A, laneD, units, counters);
     while (laneD.length < laneA.length) laneD.push(null);
-    return { A, D, a0: count(A), d0: count(D), laneA, laneD, round: 0,
+    // aimA／aimD：{ 我方兵種: 指定攻擊的敵方兵種 }（玩家可直接指定打對方任一排，例如最後一排）
+    return { A, D, a0: count(A), d0: count(D), laneA, laneD, aimA: {}, aimD: {}, adapted: 0, round: 0,
       rounds: [{ A: { ...A }, D: { ...D }, toA: {}, toD: {} }], done: !count(A) || !count(D) };
   }
   // 第 i 排的攻擊目標：對面那排，沒有就找最近的（同距離取上面那排）
@@ -67,13 +68,13 @@ const Combat = (() => {
     lanes.forEach((k, j) => { if (k && army[k] > 0 && (best < 0 || Math.abs(j - i) < Math.abs(best - i))) best = j; });
     return best;
   }
-  function laneDamage(o, from, fromLanes, to, toLanes, mult, moto, random) {
+  function laneDamage(o, from, fromLanes, aims, to, toLanes, mult, moto, random) {
     const out = {};
     fromLanes.forEach((k, i) => {
       if (!k || !from[k]) return;
       const j = targetLane(toLanes, to, i);
       if (j < 0) return;
-      const t = toLanes[j], u = o.units[k];
+      const t = to[aims[k]] > 0 ? aims[k] : toLanes[j], u = o.units[k]; // 指定的目標還活著就打它
       out[t] = (out[t] || 0) + from[k] * u.atk * mult * (u.cls === 'moto' ? moto : 1) * (0.8 + random() * 0.4) * 0.35
         * (o.counters[u.cls] === o.units[t].cls ? 1.6 : 1);
     });
@@ -88,13 +89,21 @@ const Combat = (() => {
   }
   function step(st, o, random = Math.random) {
     if (st.done) return st;
-    const toD = laneDamage(o, st.A, st.laneA, st.D, st.laneD, o.attackMult / o.defenseMult, o.attackerMoto ?? 1, random);
-    const toA = laneDamage(o, st.D, st.laneD, st.A, st.laneA, o.defenderAttack, o.defenderMoto ?? 1, random);
+    const toD = laneDamage(o, st.A, st.laneA, st.aimA, st.D, st.laneD, o.attackMult / o.defenseMult, o.attackerMoto ?? 1, random);
+    const toA = laneDamage(o, st.D, st.laneD, st.aimD, st.A, st.laneA, o.defenderAttack, o.defenderMoto ?? 1, random);
     applyDamage(st.D, toD, o.units, random);
     applyDamage(st.A, toA, o.units, random);
     st.round++;
     st.rounds.push({ A: { ...st.A }, D: { ...st.D }, toA, toD });
     st.done = !count(st.A) || !count(st.D) || st.round >= MAX_ROUNDS;
+    // AI 那一方每打完一合，照對手目前的排法重新排成剋制位置（o.adapt：'A'、'D'、'AD' 或 ''，預設守方）
+    // 打完才反應，所以玩家換排後至少有一合是用新排法打
+    if (!st.done) for (const side of o.adapt ?? 'D') {
+      const lanes = side === 'A' ? st.laneA : st.laneD;
+      const next = counterLanes(side === 'A' ? st.A : st.D, side === 'A' ? st.laneD : st.laneA, o.units, o.counters);
+      while (next.length < lanes.length) next.push(null);
+      if (next.join() !== lanes.join()) { lanes.splice(0, lanes.length, ...next); st.adapted = st.round; }
+    }
     return st;
   }
   // 換排：把自己的第 i 排和第 j 排對調（side = 'A' 攻方、'D' 守方）
@@ -102,6 +111,15 @@ const Combat = (() => {
     const lanes = side === 'A' ? st.laneA : st.laneD;
     if (st.done || i === j || i < 0 || j < 0 || i >= lanes.length || j >= lanes.length) return false;
     [lanes[i], lanes[j]] = [lanes[j], lanes[i]];
+    return true;
+  }
+  // 指定攻擊目標：side 方的 kind 那一排改打敵方 foeKind 那一排；foeKind 為 null 則恢復打正對面
+  function aim(st, side, kind, foeKind) {
+    const aims = side === 'A' ? st.aimA : st.aimD, mine = side === 'A' ? st.A : st.D, foe = side === 'A' ? st.D : st.A;
+    if (st.done || !(mine[kind] > 0)) return false;
+    if (foeKind === null || aims[kind] === foeKind) delete aims[kind];
+    else if (foe[foeKind] > 0) aims[kind] = foeKind;
+    else return false;
     return true;
   }
   function finish(st, retreated = false) {
@@ -127,6 +145,6 @@ const Combat = (() => {
     }
     return { chance: Math.round(wins / trials * 100), lostA: Math.round(lostA / trials), lostD: Math.round(lostD / trials) };
   }
-  return { plan, planSize, validDeployment, setup, step, swap, finish, resolve, estimate, count };
+  return { plan, planSize, validDeployment, setup, step, swap, aim, finish, resolve, estimate, count };
 })();
 if (typeof module !== 'undefined') module.exports = Combat;
