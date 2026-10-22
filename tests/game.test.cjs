@@ -267,7 +267,7 @@ test('failed expeditions preserve enemy casualties for the next sortie', async (
   assert.equal(h.S.army.keelung.inf, 1);
 });
 test('raids allow three preparation days, happen once per scheduled day and honor defenses', () => {
-  const { h } = unifiedFixture(); h.checkEnd(); h.startInvasion();
+  const { h } = unifiedFixture(); h.checkEnd(); h.startInvasion(); h.S.speed = 99;
   for (const port of Invasion.PORTS) h.S.army[port] = {};
   h.S.day += 2; h.invasionRaid(); assert.equal(h.S.invasion.shield, 100);
   h.S.day += 1; h.invasionRaid(); assert.equal(h.S.invasion.shield, 82);
@@ -280,7 +280,7 @@ test('shield collapse shows a final defeat and leaves the previous checkpoint av
   const { h, get, storage } = unifiedFixture(); h.checkEnd(); h.startInvasion();
   const previous = storage.get('taiwan-war:v1:auto');
   for (const port of Invasion.PORTS) h.S.army[port] = {};
-  h.S.invasion.shield = 10; h.S.day += 3; h.invasionRaid();
+  h.S.speed = 99; h.S.invasion.shield = 10; h.S.day += 3; h.invasionRaid();
   assert.equal(h.S.over, true); assert.equal(h.S.invasion.status, 'lost');
   assert.match(get('#endTitle').textContent, /防線/);
   assert.equal(storage.get('taiwan-war:v1:auto'), previous);
@@ -425,14 +425,36 @@ async function untilStep(f, step) {
   for (let i = 0; i < 200 && !(f.h.BV.open && f.h.BV.step >= step); i++) { if (f.timers.length) f.timers.shift()(); await Promise.resolve(); }
   assert.ok(f.h.BV.open && f.h.BV.step >= step, 'battle screen should be playing');
 }
-test('combat rounds start from the line-up, end at the result and support retreat at any clash', () => {
-  const r = Combat.resolve(options({ inf: 12, moto: 3 }, { gen: 14 }), () => 0.5);
-  assert.deepEqual(r.rounds[0].A, { inf: 12, moto: 3 }); assert.deepEqual(r.rounds[0].D, { gen: 14 });
-  assert.deepEqual(r.rounds.at(-1).A, r.A); assert.deepEqual(r.rounds.at(-1).D, r.D);
-  const early = Combat.retreat(r, 0);
-  assert.equal(early.lostA + early.lostD, 0); assert.equal(early.win, false); assert.ok(early.retreated);
-  const mid = Combat.retreat(r, 1);
+test('battles run until one side is wiped out and retreat keeps the current survivors', () => {
+  for (const [a, d] of [[{ inf: 12, moto: 3 }, { gen: 14 }], [{ elite: 3 }, { inf: 25 }], [{ inf: 2 }, { gen: 20 }]]) {
+    const r = Combat.resolve(options(a, d));
+    assert.ok(Combat.count(r.A) === 0 || Combat.count(r.D) === 0, 'no round limit: someone is annihilated');
+    assert.deepEqual(r.rounds.at(-1).A, r.A);
+  }
+  const o = options({ inf: 12, moto: 3 }, { gen: 14 }), st = Combat.setup(o);
+  assert.equal(Combat.finish(st, true).lostA, 0);
+  Combat.step(st, o, () => 0.5);
+  const mid = Combat.finish(st, true);
+  assert.ok(mid.retreated); assert.equal(mid.win, false);
   assert.equal(Combat.count(mid.A) + mid.lostA, 15); assert.equal(Combat.count(mid.D) + mid.lostD, 14);
+});
+test('each unit type fights in its own row; attackers line up against what they counter', () => {
+  const o = options({ moto: 5, gen: 5 }, { inf: 6, art: 4 }), st = Combat.setup(o);
+  assert.deepEqual([...st.laneD], ['inf', 'art']);
+  assert.deepEqual([...st.laneA], ['gen', 'moto'], 'gen faces inf, moto faces art');
+  Combat.step(st, o, () => 0.5);
+  const hit = st.rounds[1].toD;
+  assert.ok(hit.inf > 0 && hit.art > 0, 'each row hits the row opposite');
+  // swapping rows changes the matchup: moto now faces inf and loses the counter bonus
+  const o2 = options({ moto: 5, gen: 5 }, { inf: 6, art: 4 }), good = Combat.setup(o2), bad = Combat.setup(o2);
+  assert.ok(Combat.swap(bad, 'A', 0, 1));
+  Combat.step(good, o2, () => 0.5); Combat.step(bad, o2, () => 0.5);
+  const total = st => Object.values(st.rounds[1].toD).reduce((x, y) => x + y, 0);
+  assert.ok(total(good) > total(bad));
+  // a row with an empty opposite lane attacks the nearest enemy row
+  const lone = Combat.setup(options({ inf: 4, moto: 4, art: 4 }, { gen: 6 }));
+  Combat.step(lone, options({ inf: 4, moto: 4, art: 4 }, { gen: 6 }), () => 0.5);
+  assert.ok(lone.rounds[1].toD.gen > 0);
 });
 test('player battles open the battle screen and close it after the result', async () => {
   const f = fixture(), { h, get } = f;
@@ -595,4 +617,52 @@ test('old saves drop regional skills from custom slots and fill in AI slots', ()
   assert.deepEqual([...loaded.data.slots.kaohsiung], ['kaohsiung', null]);
   const bad = structuredClone(save); bad.data.slots.taipei = ['taipei', 'nope'];
   assert.throws(() => GameSaves.decode(JSON.stringify(bad), h.saveRules));
+});
+
+test('air raids play on the battle screen with the player defending and apply only afterwards', async () => {
+  const f = unifiedFixture(), { h, get } = f; h.checkEnd(); h.startInvasion();
+  for (const port of Invasion.PORTS) h.S.army[port] = { inf: 3 };
+  h.S.day += 3;
+  const raid = h.invasionRaid(h.S.gen);
+  await untilStep(f, 0);
+  assert.equal(get('#battleScreen').hidden, false);
+  assert.equal(get('#bsRetreat').hidden, true, 'defenders cannot retreat');
+  assert.match(get('#bsTitle').textContent, /防空戰/);
+  const sides = get('#bsSides').innerHTML;
+  assert.ok(sides.indexOf('（你）') < sides.indexOf('外星空襲部隊'), 'the player stays on the left');
+  assert.match(get('#bsField').className, /flip/);
+  assert.ok(get('#bsField').innerHTML.indexOf('bsWall') < get('#bsField').innerHTML.indexOf('bsGap'), 'wall in front of the defender');
+  assert.equal(h.S.busy, true, 'no orders or autosaves mid-raid');
+  assert.equal(h.S.invasion.shield, 100, 'damage lands after the playback');
+  await f.flush(); await raid;
+  assert.equal(get('#battleScreen').hidden, true); assert.equal(h.S.busy, false);
+  assert.ok(h.S.invasion.shield < 100);
+  assert.match(get('#bsStamp').innerHTML, /防線突破|攔截成功/);
+});
+test('a raid interrupted by a new game leaves the new game untouched', async () => {
+  const f = unifiedFixture(), { h } = f; h.checkEnd(); h.startInvasion();
+  h.S.day += 3;
+  const raid = h.invasionRaid(h.S.gen);
+  await untilStep(f, 0);
+  ++h.S.gen; h.initState('play', 'tainan');
+  const before = JSON.stringify({ owner: h.S.owner, army: h.S.army });
+  await f.flush(); await raid;
+  assert.equal(JSON.stringify({ owner: h.S.owner, army: h.S.army }), before);
+});
+
+test('the player moves their own rows with the bottom buttons during a battle', async () => {
+  const f = fixture(), { h, get } = f;
+  h.S.army.taipei = { inf: 10, moto: 6 }; h.S.army.newtaipei = { gen: 12, art: 6 };
+  const battle = h.doAttack('taipei', 'newtaipei', h.S.gen, false, { inf: 9, moto: 6 });
+  await untilStep(f, 0);
+  assert.equal(get('#bsMove').hidden, false);
+  const before = [...h.BV.st.laneA];
+  assert.equal(h.BV.sel, 0);
+  get('#bsBack').handlers.click();
+  assert.deepEqual([...h.BV.st.laneA], [before[1], before[0]]);
+  assert.equal(h.BV.sel, 1);
+  assert.equal(h.BV.st.laneD.join(), 'gen,art', 'cannot touch enemy rows');
+  await f.flush(); await battle;
+  const r = h.S.lastBattle;
+  assert.ok(Combat.count(r.A) === 0 || Combat.count(r.D) === 0);
 });
