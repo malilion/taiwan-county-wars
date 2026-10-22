@@ -65,7 +65,7 @@
       mode, player: player || null, over: false, day: 1, turnIdx: 0, current: null, sel: null, busy: false, invasion: null, expeditionPort: null, lastExpedition: null,
       sendHalf: false, acted: new Set(), owner: {}, army: {}, money: {}, research: {}, aggr: {}, paused: false,
       units: Object.fromEntries(Object.entries({ ...UNITS, ...Invasion.UNITS }).map(([k, u]) => [k, { ...u, owner: null }])), unitSeq: 0,
-      posture: Object.fromEntries(COUNTIES.map(c => [c.id, 'balanced'])), buildings: Object.fromEntries(COUNTIES.map(c => [c.id, null])), skillReady: {}, buff: {}, stun: {}, menuOpen: false, transferMode: false, attack: null, lastBattle: null,
+      posture: Object.fromEntries(COUNTIES.map(c => [c.id, 'balanced'])), buildings: Object.fromEntries(COUNTIES.map(c => [c.id, null])), skillReady: {}, buff: {}, stun: {}, menuOpen: false, transferMode: false, attack: null, lastBattle: null, aim: null, news: [],
     });
     COUNTIES.forEach(c => {
       S.owner[c.id] = c.id;
@@ -88,6 +88,7 @@
     S.gen++;
     closeActionDialogs();
     closeBattle();
+    $('#newsFlash').hidden = true;
     clearArrows();
     initState(mode, player);
     S.gameDiffKey = mode === 'play' ? S.diffKey : 'hard';
@@ -145,6 +146,10 @@
     if (gen !== S.gen || S.over) return;
     S.turnIdx++;
     if (S.turnIdx >= S.order.length) {
+      const news = S.news;
+      S.news = [];
+      await broadcastNews(S.day, news, gen);
+      if (gen !== S.gen || S.over) return;
       S.turnIdx = 0;
       S.day++;
       log(`── 第 ${S.day} 天 ──`, 'day');
@@ -161,6 +166,7 @@
     const gen = S.gen;
     S.sel = null;
     S.transferMode = false;
+    clearAim();
     S.current = null;
     render();
     nextTurn(gen).then(() => { if (gen === S.gen) runLoop(gen); });
@@ -212,6 +218,7 @@
       S.army[tgt] = r.A;
       S.acted.add(tgt);
       popText(tgt, '攻陷！', '#ffd166');
+      S.news.push({ kind: 'capture', fa, fd, tgt });
       log(`⚔️ ${fTag(fa)} 從 ${cTag(src)} 出兵攻下 ${cTag(tgt)}（${fTag(fd)}），折損 ${r.lostA} 兵`, fa === S.player ? 'me' : '');
       if (!owned(fd).length) eliminated(fd, fa);
     } else {
@@ -256,7 +263,9 @@
     '在地網紅開直播哭了三小時。',
   ];
   function eliminated(f, by) {
-    log(`💀 ${fTag(f)} 勢力被 ${fTag(by)} 消滅！${pick(ELIM_LINES)}（剩 ${alive().length} 個勢力）`, 'big');
+    const line = pick(ELIM_LINES);
+    S.news.push({ kind: 'elim', f, by, line });
+    log(`💀 ${fTag(f)} 勢力被 ${fTag(by)} 消滅！${line}（剩 ${alive().length} 個勢力）`, 'big');
   }
 
   function checkEnd() {
@@ -698,6 +707,7 @@
 
   async function onCountyClick(id) {
     if (S.over) return;
+    if (S.aim && playerActive()) return aimAt(id);
     if (!playerActive()) { S.sel = id; render(); return; }
     const mine = S.owner[id] === S.player;
     const sel = S.sel && S.owner[S.sel] === S.player ? S.sel : null;
@@ -718,6 +728,7 @@
   function closeActionDialogs() {
     for (const id of ['designer', 'transfer', 'skillPicker', 'attackDialog']) $('#' + id).hidden = true;
     S.attack = S.tr = S.picker = S.draft = null;
+    clearAim();
   }
 
   function openAttack(src, tgt, kind = 'county') {
@@ -1052,6 +1063,168 @@
     BV.wake?.();
   });
 
+  // ───────── 框選士兵＋箭頭指揮 ─────────
+  // 在己方兵力格上拖曳出框框選士兵，放開後出現箭頭：藍色＝調兵到己方縣市、紅色＝進攻相鄰敵方縣市
+  const cellUnits = a => kinds(a).sort((x, y) => UNIT_KEYS.indexOf(U(x).cls) - UNIT_KEYS.indexOf(U(y).cls)).flatMap(k => Array(a[k]).fill(k));
+  let box = null, aimEl = null;
+  const pickedCells = id => S.aim?.src === id ? S.aim.cells : box?.src === id ? box.cells : new Set();
+  function pickedArmy(src, cells) {
+    const units = cellUnits(S.army[src]), out = {};
+    for (const i of cells) if (units[i]) addUnits(out, units[i], 1);
+    return out;
+  }
+  function startAim(src, cells) {
+    const picked = new Set([...cells].filter(i => i < count(S.army[src])));
+    if (!playerActive() || S.owner[src] !== S.player || !picked.size) return false;
+    S.aim = { src, cells: picked, fresh: true };
+    setTimeout(() => { if (S.aim) S.aim.fresh = false; }, 0); // 放開滑鼠後緊接的 click 不算選目標
+    S.sel = src;
+    S.transferMode = false;
+    render();
+    drawAim();
+    return true;
+  }
+  function clearAim() {
+    S.aim = null;
+    if (aimEl) { aimEl.path.remove(); aimEl.label.remove(); aimEl = null; }
+  }
+  // 箭頭目標：attack＝紅、move＝藍、null＝灰（附原因）
+  function aimTarget(id) {
+    const src = S.aim?.src;
+    if (!src || !id || id === src) return { kind: null };
+    if (S.owner[id] === S.player) {
+      if (!reachable(src).has(id)) return { kind: null, reason: '沒有相連的己方領土可以調兵過去' };
+      return room(id) ? { kind: 'move' } : { kind: null, reason: `${byId[id].short}已滿 ${MAX_TROOPS} 人` };
+    }
+    if (!ADJ[src].has(id)) return { kind: null, reason: '只能進攻相鄰的敵方縣市' };
+    if (S.acted.has(src)) return { kind: null, reason: `${byId[src].short}今天已經出兵過了` };
+    if (stunned(src)) return { kind: null, reason: `${byId[src].short}被困住了，到第 ${S.stun[src]} 天都無法出兵` };
+    if (count(S.army[src]) < 2) return { kind: null, reason: '至少要留 1 人守家' };
+    return { kind: 'attack' };
+  }
+  function aimAt(id) {
+    const { src, cells, fresh } = S.aim;
+    if (id === src) { if (!fresh) { clearAim(); render(); } return; }
+    const t = aimTarget(id);
+    if (!t.kind) return flash(t.reason || '這裡不能去');
+    const sent = pickedArmy(src, cells);
+    clearAim();
+    if (t.kind === 'move') {
+      let moved = 0;
+      for (const k of kinds(sent)) { const n = addCapped(id, k, Math.min(sent[k], S.army[src][k])); S.army[src][k] -= n; moved += n; }
+      log(`🚚 從 ${cTag(src)} 調 ${moved} 兵到 ${cTag(id)}`, 'me');
+      if (moved < count(sent)) flash(`${byId[id].short}只塞得下 ${moved} 人`);
+      S.sel = id;
+      render();
+      return;
+    }
+    // 全選時自動留 1 人守家（留最便宜的兵）
+    if (count(sent) >= count(S.army[src])) sent[kinds(sent).sort((a, b) => U(a).cost - U(b).cost)[0]]--;
+    render();
+    openAttack(src, id);
+    S.attack.sent = sent;
+    renderAttack();
+  }
+  function drawAim(point) {
+    if (!S.aim) return;
+    const src = S.aim.src, hover = S.hover && S.hover !== src ? S.hover : null;
+    const t = aimTarget(hover);
+    const [x1, y1] = map.labelPos[src];
+    let [x2, y2] = hover ? map.labelPos[hover] : point || [x1 + 40, y1 - 40];
+    const dx = x2 - x1, dy = y2 - y1, len = Math.hypot(dx, dy) || 1;
+    if (hover) { x2 -= dx / len * 14; y2 -= dy / len * 14; }
+    const mx = (x1 + x2) / 2 - dy * 0.15, my = (y1 + y2) / 2 + dx * 0.15;
+    const color = t.kind === 'attack' ? '#ef476f' : t.kind === 'move' ? '#3a86ff' : '#8fa3c7';
+    if (!aimEl) {
+      aimEl = { path: svgEl('path', { class: 'aimArrow', 'marker-end': 'url(#arrowhead)' }, map.fx), label: svgEl('text', { class: 'aimLabel' }, map.fx) };
+    }
+    aimEl.path.setAttribute('d', `M${x1},${y1}Q${mx},${my} ${x2},${y2}`);
+    aimEl.path.setAttribute('stroke', color);
+    aimEl.label.setAttribute('x', mx);
+    aimEl.label.setAttribute('y', my);
+    aimEl.label.setAttribute('fill', color);
+    const n = S.aim.cells.size, keep = t.kind === 'attack' && n >= count(S.army[src]); // 進攻時全選會自動留 1 人守家
+    aimEl.label.textContent = `${keep ? n - 1 : n} 人${t.kind === 'attack' ? ' ⚔️ 進攻' : t.kind === 'move' ? ' 🚚 調兵' : ''}${keep ? '（留 1 守家）' : ''}`;
+  }
+  const mapSvg = $('#map');
+  const toMap = e => { const p = new DOMPoint(e.clientX, e.clientY).matrixTransform(mapSvg.getScreenCTM().inverse()); return [p.x, p.y]; };
+  function boxCells(id, [ax, ay], [bx, by]) {
+    const [x, y] = map.labelPos[id], out = new Set();
+    const x0 = Math.min(ax, bx), x1 = Math.max(ax, bx), y0 = Math.min(ay, by), y1 = Math.max(ay, by);
+    for (let i = 0; i < count(S.army[id]); i++) {
+      const cx = x - 13.6 + (i % 5) * 5.5, cy = y - 22 + 9.7 + Math.floor(i / 5) * 5.5; // 與 map.js 卡片格子位置一致
+      if (cx < x1 && cx + 5 > x0 && cy < y1 && cy + 5 > y0) out.add(i);
+    }
+    return out;
+  }
+  for (const c of COUNTIES) {
+    for (const [el, mode] of [[map.cards[c.id].g, 'box'], [map.labels[c.id].g, 'all']]) {
+      el.addEventListener('pointerdown', e => {
+        if (e.button !== 0 || !playerActive() || S.owner[c.id] !== S.player || !count(S.army[c.id])) return;
+        e.stopPropagation(); // 不要拖曳地圖
+        if (S.aim && S.aim.src !== c.id) return; // 瞄準中點其他己方縣市＝選目標，交給 click
+        clearAim();
+        box = { src: c.id, mode, start: toMap(e), sx: e.clientX, sy: e.clientY, moved: false, cells: new Set(), el: null };
+      });
+    }
+  }
+  window.addEventListener('pointermove', e => {
+    if (box) {
+      if (!box.moved && Math.hypot(e.clientX - box.sx, e.clientY - box.sy) < 5) return;
+      box.moved = true;
+      const p = toMap(e);
+      if (box.mode === 'all') {
+        box.cells = new Set(Array.from({ length: count(S.army[box.src]) }, (_, i) => i));
+        startAim(box.src, box.cells);
+        box = null;
+        drawAim(p);
+        return;
+      }
+      if (!box.el) box.el = svgEl('rect', { class: 'pickBox' }, map.fx);
+      const [ax, ay] = box.start;
+      box.el.setAttribute('x', Math.min(ax, p[0]));
+      box.el.setAttribute('y', Math.min(ay, p[1]));
+      box.el.setAttribute('width', Math.abs(p[0] - ax));
+      box.el.setAttribute('height', Math.abs(p[1] - ay));
+      box.cells = boxCells(box.src, box.start, p);
+      renderCards();
+      return;
+    }
+    if (S.aim && e.target.closest?.('#map')) drawAim(toMap(e));
+  });
+  window.addEventListener('pointerup', () => {
+    if (!box) return;
+    const { src, cells, moved, el } = box;
+    el?.remove();
+    box = null;
+    if (!moved) return; // 只是點一下，照原本的點選流程
+    if (!startAim(src, cells)) { renderCards(); flash('框框內沒有士兵，再拖曳一次'); }
+  });
+  mapSvg.addEventListener('contextmenu', e => { if (S.aim) { e.preventDefault(); clearAim(); render(); } });
+
+  // ───────── 每日新聞 ─────────
+  // 一天結束時，把當天的攻陷與滅亡做成新聞快報
+  let newsWake = null;
+  async function broadcastNews(day, news, gen) {
+    const elims = news.filter(n => n.kind === 'elim'), caps = news.filter(n => n.kind === 'capture');
+    if (!news.length) return;
+    const headline = elims.length ? elims.map(n => `${byId[n.f].short}滅亡`).join('、') : `${caps.length} 座縣市易主`;
+    log(`📺 第 ${day} 天晚間新聞：${headline}${elims.length && caps.length ? `；另有 ${caps.length} 座縣市易主` : ''}`, 'event');
+    if (S.speed >= 99) return;
+    const capLine = n => `<li><span class="sw" style="background:${byId[n.fa].color}"></span><b>${byId[n.fa].short}</b> 攻下 <b>${byId[n.tgt].name}</b>${n.fd !== n.tgt ? `<small>（原屬${byId[n.fd].short}）</small>` : ''}${n.fa === S.player ? '<em>你</em>' : n.fd === S.player ? '<em class="bad">你失守</em>' : ''}</li>`;
+    $('#newsTitle').textContent = `第 ${day} 天晚間新聞`;
+    $('#newsBody').innerHTML = elims.map(n => `<div class="newsElim"><b style="color:${byId[n.f].color}">${byId[n.f].name}</b> 滅亡了！
+        <small>被 <b style="color:${byId[n.by].color}">${byId[n.by].short}</b> 殲滅。${n.line}</small></div>`).join('')
+      + (caps.length ? `<ul class="newsCaps">${caps.slice(0, 4).map(capLine).join('')}${caps.length > 4 ? `<li class="more">…等共 ${caps.length} 場攻陷</li>` : ''}</ul>` : '');
+    $('#newsFoot').textContent = `全台剩下 ${alive().length} 個勢力・點一下關閉`;
+    $('#newsFlash').hidden = false;
+    await new Promise(r => { newsWake = r; setTimeout(r, (2400 + 1200 * elims.length) / Math.min(S.speed, 2)); }); // 加速時也留時間看新聞
+    newsWake = null;
+    while ((S.paused || S.menuOpen) && gen === S.gen) await new Promise(r => setTimeout(r, 120));
+    $('#newsFlash').hidden = true;
+  }
+  $('#newsFlash').addEventListener('click', () => newsWake?.());
+
   // ───────── 特效 ─────────
   function showArrow(a, b, color) {
     if (S.speed >= 99) return;
@@ -1202,6 +1375,7 @@
         ${unitIcon(k)} ${esc(U(k).name)}<br><small>${unitCost(k, id)} 萬・攻${U(k).atk}/血${U(k).hp}・${UNIT_CLASSES[U(k).cls]}</small></button>`).join('')}</div>
         <button id="trBtn" class="trBtn ${S.transferMode ? 'on' : ''}" ${reachable(id).size ? '' : 'disabled'}>🚚 ${S.transferMode ? '點地圖上綠框的己方縣市（再按一次取消）' : reachable(id).size ? '調兵到其他己方縣市' : '調兵（還沒有其他相連的己方縣市）'}</button>
         <label class="half"><input type="checkbox" id="halfChk" ${S.sendHalf ? 'checked' : ''}> 進攻時只派一半兵力（其餘留守）</label>
+        <p class="hint boxHint">🖱️ 在地圖的兵力格上<b>拖曳框選</b>士兵（縮小時從縣市圓點拖曳＝全軍），再點目標：<b class="hl-r">紅色箭頭</b>進攻、<b class="hl-b">藍色箭頭</b>調兵</p>
         <p class="hint">${stunned(id) ? `😵 被困住了，到第 ${S.stun[id]} 天都無法出兵` : acted ? '⛔ 這個縣市今天已經出兵過了（還能招兵、調兵）' : count(a) > 1 ? '👉 點擊<b class="hl-r">閃爍紅框</b>的敵方縣市，配置出征部隊' : count(a) === 1 ? '至少留 1 人守家，招兵後才能出征' : '先招兵才能出擊'}</p>`;
     }
     box.innerHTML = html;
@@ -1215,10 +1389,10 @@
       card.name.textContent = `${c.short} ${count(a)}`;
       card.g.classList.toggle('mine', S.mode === 'play' && f === S.player);
       card.g.classList.toggle('selected', id === S.sel);
-      const units = kinds(a).sort((x, y) => UNIT_KEYS.indexOf(U(x).cls) - UNIT_KEYS.indexOf(U(y).cls)).flatMap(k => Array(a[k]).fill(k));
+      const units = cellUnits(a), picked = pickedCells(id);
       card.cells.forEach((cell, i) => {
         const k = units[i];
-        cell.rect.setAttribute('class', 'ccell' + (k ? ' cls-' + U(k).cls : ''));
+        cell.rect.setAttribute('class', 'ccell' + (k ? ' cls-' + U(k).cls : '') + (k && picked.has(i) ? ' picked' : ''));
         // 基本兵種用 sprite；自組兵種的 icon 本身就是圖片路徑
         const sprite = k && (U(k).sprite || (U(k).icon.startsWith('assets/') ? U(k).icon : null));
         if (sprite) cell.img.setAttribute('href', sprite);
@@ -1237,7 +1411,7 @@
 
   // 5×5 兵力格：每格一名戰鬥人員
   function troopGrid(a) {
-    const cells = kinds(a).sort((x, y) => UNIT_KEYS.indexOf(U(x).cls) - UNIT_KEYS.indexOf(U(y).cls)).flatMap(k => Array(a[k]).fill(k));
+    const cells = cellUnits(a);
     return `<div class="tgrid">${Array.from({ length: MAX_TROOPS }, (_, i) =>
       `<span class="tcell ${cells[i] ? 'cls-' + U(cells[i]).cls : ''}">${cells[i] ? unitIcon(cells[i], 'tcellImg') : ''}</span>`).join('')}</div>`;
   }
@@ -1340,7 +1514,8 @@
       ++S.gen;
       closeActionDialogs();
       closeBattle();
-      Object.assign(S, save.data, { diff: DIFFICULTY[save.data.diffKey], gameDiffKey: save.data.diffKey, over: false, busy: false, paused: false, transferMode: false, hover: null, lastBattle: null, lastExpedition: null, expeditionPort: null });
+      $('#newsFlash').hidden = true;
+      Object.assign(S, save.data, { diff: DIFFICULTY[save.data.diffKey], gameDiffKey: save.data.diffKey, over: false, busy: false, paused: false, transferMode: false, hover: null, lastBattle: null, lastExpedition: null, expeditionPort: null, aim: null, news: [] });
       lastAuto = '';
       $('#log').replaceChildren();
       for (const text of save.logs) { const div = document.createElement('div'); div.className = 'entry'; div.textContent = text; $('#log').appendChild(div); }
@@ -1418,7 +1593,7 @@
     }
     if (!$('#attackDialog').hidden || !$('#modal').hidden || !$('#designer').hidden || !$('#transfer').hidden || !$('#skillPicker').hidden || e.target.tagName === 'INPUT') return;
     if (e.key === 'Enter' || e.key === 'e') endPlayerTurn();
-    if (e.key === 'Escape') { S.sel = null; S.transferMode = false; render(); }
+    if (e.key === 'Escape') { S.sel = null; S.transferMode = false; clearAim(); render(); }
   });
 
   // 小地圖與縮放
