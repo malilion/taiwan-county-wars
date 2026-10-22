@@ -267,7 +267,7 @@ test('failed expeditions preserve enemy casualties for the next sortie', async (
   assert.equal(h.S.army.keelung.inf, 1);
 });
 test('raids allow three preparation days, happen once per scheduled day and honor defenses', () => {
-  const { h } = unifiedFixture(); h.checkEnd(); h.startInvasion();
+  const { h } = unifiedFixture(); h.checkEnd(); h.startInvasion(); h.S.speed = 99;
   for (const port of Invasion.PORTS) h.S.army[port] = {};
   h.S.day += 2; h.invasionRaid(); assert.equal(h.S.invasion.shield, 100);
   h.S.day += 1; h.invasionRaid(); assert.equal(h.S.invasion.shield, 82);
@@ -280,7 +280,7 @@ test('shield collapse shows a final defeat and leaves the previous checkpoint av
   const { h, get, storage } = unifiedFixture(); h.checkEnd(); h.startInvasion();
   const previous = storage.get('taiwan-war:v1:auto');
   for (const port of Invasion.PORTS) h.S.army[port] = {};
-  h.S.invasion.shield = 10; h.S.day += 3; h.invasionRaid();
+  h.S.speed = 99; h.S.invasion.shield = 10; h.S.day += 3; h.invasionRaid();
   assert.equal(h.S.over, true); assert.equal(h.S.invasion.status, 'lost');
   assert.match(get('#endTitle').textContent, /防線/);
   assert.equal(storage.get('taiwan-war:v1:auto'), previous);
@@ -595,4 +595,31 @@ test('old saves drop regional skills from custom slots and fill in AI slots', ()
   assert.deepEqual([...loaded.data.slots.kaohsiung], ['kaohsiung', null]);
   const bad = structuredClone(save); bad.data.slots.taipei = ['taipei', 'nope'];
   assert.throws(() => GameSaves.decode(JSON.stringify(bad), h.saveRules));
+});
+
+test('air raids play on the battle screen with the player defending and apply only afterwards', async () => {
+  const f = unifiedFixture(), { h, get } = f; h.checkEnd(); h.startInvasion();
+  for (const port of Invasion.PORTS) h.S.army[port] = { inf: 3 };
+  h.S.day += 3;
+  const raid = h.invasionRaid(h.S.gen);
+  await untilStep(f, 0);
+  assert.equal(get('#battleScreen').hidden, false);
+  assert.equal(get('#bsRetreat').hidden, true, 'defenders cannot retreat');
+  assert.match(get('#bsTitle').textContent, /防空戰/);
+  assert.equal(h.S.busy, true, 'no orders or autosaves mid-raid');
+  assert.equal(h.S.invasion.shield, 100, 'damage lands after the playback');
+  await f.flush(); await raid;
+  assert.equal(get('#battleScreen').hidden, true); assert.equal(h.S.busy, false);
+  assert.ok(h.S.invasion.shield < 100);
+  assert.match(get('#bsStamp').innerHTML, /防線突破|攔截成功/);
+});
+test('a raid interrupted by a new game leaves the new game untouched', async () => {
+  const f = unifiedFixture(), { h } = f; h.checkEnd(); h.startInvasion();
+  h.S.day += 3;
+  const raid = h.invasionRaid(h.S.gen);
+  await untilStep(f, 0);
+  ++h.S.gen; h.initState('play', 'tainan');
+  const before = JSON.stringify({ owner: h.S.owner, army: h.S.army });
+  await f.flush(); await raid;
+  assert.equal(JSON.stringify({ owner: h.S.owner, army: h.S.army }), before);
 });

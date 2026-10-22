@@ -114,7 +114,8 @@
       if (owned(f).length) {
         S.current = f;
         if (f === S.player && S.invasion?.status === 'active') {
-          invasionRaid();
+          await invasionRaid(gen);
+          if (gen !== S.gen) return;
           if (S.over) { render(); return; }
         }
         produceBuildings(f);
@@ -346,13 +347,27 @@
     }
     render();
   }
-  function invasionRaid() {
+  async function invasionRaid(gen = S.gen) {
     if (!Invasion.due(S.invasion, S.day)) return;
     S.invasion.lastRaidDay = S.day;
     const port = pick(Invasion.PORTS);
     const r = Combat.resolve({ sent: Invasion.wave(S.invasion), defenders: S.army[port], units: S.units,
       counters: COUNTERS, attackMult: 1.1, defenseMult: defMult(S.player, port),
       defenderAttack: 1 + 0.12 * S.research[S.player].atk, defenderMoto: byId[port].moto || 1 });
+    if (watchBattle('invader', S.player)) {
+      // 播放期間鎖住操作與自動存檔，空襲結算前不能出兵或存檔
+      S.busy = true;
+      focusCounty(port);
+      render();
+      await playBattle({ title: `${byId[port].short}防空戰`, emblem: emblemOf(port), canRetreat: false,
+        stamps: { win: '防線突破！', hold: '攔截成功！' },
+        att: { name: '外星空襲部隊', color: '#7b2cbf', mine: false },
+        def: { name: byId[port].short, color: byId[S.player].color, mine: true } }, r, gen);
+      if (gen !== S.gen) return;
+      await finishBattle(r, gen);
+      if (gen !== S.gen) return;
+      S.busy = false;
+    }
     S.army[port] = r.D;
     const damage = r.win ? 18 : 4;
     S.invasion.shield = Math.max(0, S.invasion.shield - damage);
@@ -1030,7 +1045,8 @@
   }
   async function finishBattle(r, gen) {
     drawBattle(null, r);
-    const [text, cls] = r.retreated ? ['戰略撤退', 'retreat'] : r.win ? ['攻陷！', 'win'] : ['守住！', 'hold'];
+    const stamps = BV.view.stamps || {};
+    const [text, cls] = r.retreated ? ['戰略撤退', 'retreat'] : r.win ? [stamps.win || '攻陷！', 'win'] : [stamps.hold || '守住！', 'hold'];
     $('#bsStamp').className = `bsStamp ${cls}`;
     $('#bsStamp').innerHTML = `<b>${text}</b><small>攻方折損 ${r.lostA} 人・守方折損 ${r.lostD} 人</small>`;
     $('#bsStamp').hidden = false;
