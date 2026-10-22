@@ -6,7 +6,7 @@
   <title>台灣縣市大戰</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@400;700;900&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="style.css?v=20261022c">
+  <link rel="stylesheet" href="style.css?v=20261022d">
 </head>
 <body>
   <header id="top">
@@ -124,6 +124,28 @@
     </div>
   </div>
 
+  <div id="battleScreen" class="battleScreen" hidden role="dialog" aria-modal="true" aria-labelledby="bsTitle">
+    <div class="bsFrame">
+      <header class="bsHead">
+        <span id="bsEmblem" class="bsEmblem"></span>
+        <h2 id="bsTitle"></h2>
+        <span id="bsTimer" class="bsTimer"></span>
+      </header>
+      <div id="bsSides" class="bsSides"></div>
+      <div class="bsStage">
+        <div id="bsField" class="bsField"></div>
+        <div id="bsStamp" class="bsStamp" hidden role="status"></div>
+      </div>
+      <footer class="bsFoot">
+        <div class="bsCtrl">
+          <button id="bsPause" aria-label="暫停戰鬥">⏸</button><button id="bsFast" aria-label="切換戰鬥速度">⏩ 1x</button><button id="bsSkip">⏭ 略過</button>
+        </div>
+        <button id="bsRetreat" class="bsRetreat">🏳️ 戰略撤退！</button>
+        <button id="bsDone" class="primary" hidden>繼續 ▶</button>
+      </footer>
+    </div>
+  </div>
+
   <div id="skillPicker" class="overlay" hidden>
     <div class="dialog spDialog">
       <h2 id="spTitle"></h2>
@@ -164,12 +186,12 @@
   </div>
 
   <script src="https://cdn.jsdelivr.net/npm/d3-delaunay@6.0.4/dist/d3-delaunay.min.js"></script>
-  <script src="js/data.js?v=20261022c"></script>
-  <script src="js/map.js?v=20261022c"></script>
-  <script src="js/combat.js?v=20261022c"></script>
-  <script src="js/invasion.js?v=20261022c"></script>
-  <script src="js/saves.js?v=20261022c"></script>
-  <script src="js/game.js?v=20261022c"></script>
+  <script src="js/data.js?v=20261022d"></script>
+  <script src="js/map.js?v=20261022d"></script>
+  <script src="js/combat.js?v=20261022d"></script>
+  <script src="js/invasion.js?v=20261022d"></script>
+  <script src="js/saves.js?v=20261022d"></script>
+  <script src="js/game.js?v=20261022d"></script>
 </body>
 </html>
 
