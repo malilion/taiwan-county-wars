@@ -7,7 +7,20 @@ const GameSaves = require('../js/saves.js');
 
 function fixture() {
   class Element {
-    constructor() { this.children = []; this.hidden = true; this.style = {}; this.dataset = {}; this.handlers = {}; this.classList = { toggle() {}, add() {}, remove() {} }; }
+    constructor() {
+      this.children = []; this.hidden = true; this.style = {}; this.dataset = {}; this.handlers = {};
+      const classes = new Set();
+      this.classList = {
+        add: (...names) => { for (const name of names) classes.add(name); },
+        remove: (...names) => { for (const name of names) classes.delete(name); },
+        toggle(name, on) {
+          const next = on === undefined ? !classes.has(name) : !!on;
+          if (next) classes.add(name); else classes.delete(name);
+          return next;
+        },
+        contains: name => classes.has(name),
+      };
+    }
     set innerHTML(value) { this.html = value; this.children = []; }
     get innerHTML() { return this.html || ''; }
     get textContent() { return this.text ?? this.innerHTML.replace(/<[^>]*>/g, ''); }
@@ -44,7 +57,7 @@ function fixture() {
   }`, context);
   let source = fs.readFileSync('js/game.js', 'utf8');
   const at = source.lastIndexOf('})();');
-  source = source.slice(0, at) + `Object.assign(harness, { S, initState, runLoop, endPlayerTurn, doAttack, saveCheckpoint, loadCheckpoint, saveRules, render, buildFacility, produceBuildings, income, defMult, openAttack, showStart, newGame, recruit, confirmTransfer, changeTransfer, freshArmy, checkEnd, startInvasion, doExpedition, invasionRaid, expeditionAllowed, borderThreat, setPosture, atkMult, aiTurn, BV, startAim, aimAt, pickedArmy, nextTurn, openSkillPicker, useSkill, aiUseSkills });` + source.slice(at);
+  source = source.slice(0, at) + `Object.assign(harness, { S, initState, runLoop, endPlayerTurn, requestEndTurn, doAttack, saveCheckpoint, loadCheckpoint, saveRules, render, buildFacility, produceBuildings, income, defMult, openAttack, showStart, newGame, recruit, confirmTransfer, changeTransfer, freshArmy, checkEnd, startInvasion, doExpedition, invasionRaid, expeditionAllowed, borderThreat, setPosture, atkMult, aiTurn, BV, startAim, aimAt, pickedArmy, nextTurn, openSkillPicker, useSkill, aiUseSkills });` + source.slice(at);
   vm.runInContext(source, context);
   const h = context.harness;
   h.initState('play', 'taipei');
@@ -996,4 +1009,52 @@ test('an AI faction uses at most two skills per turn and skips defense during pe
   h.S.buff = {};
   h.aiUseSkills('newtaipei');
   assert.ok(h.S.buff.miaoli?.def, 'defense is allowed once peace is over');
+});
+
+test('ending the turn asks once, then ends on the second request', () => {
+  const { h, get } = fixture();
+  h.render();
+  const btn = get('#endTurn');
+  assert.equal(btn.textContent, '結束回合 ▶');
+  h.requestEndTurn();
+  assert.equal(h.S.current, 'taipei');
+  assert.equal(btn.textContent, '還有 1 個縣市可出征，確定結束？');
+  assert.equal(btn.classList.contains('confirming'), true);
+  h.requestEndTurn();
+  assert.notEqual(h.S.current, 'taipei');
+  assert.equal(btn.classList.contains('confirming'), false);
+});
+
+test('end-turn confirmation reverts without ending, and a direct end still works', async () => {
+  const f = fixture(), { h, get } = f;
+  h.render();
+  const btn = get('#endTurn');
+  h.S.acted.add('taipei');
+  h.requestEndTurn();
+  assert.equal(h.S.current, 'taipei');
+  assert.equal(btn.textContent, '確定結束回合？');
+  await f.flush();
+  assert.equal(h.S.current, 'taipei');
+  assert.equal(btn.textContent, '結束回合 ▶');
+  assert.equal(btn.classList.contains('confirming'), false);
+
+  h.S.acted.clear();
+  h.S.owner.newtaipei = 'taipei';
+  h.requestEndTurn();
+  assert.equal(btn.textContent, '還有 2 個縣市可出征，確定結束？');
+  h.S.sel = 'taipei';
+  h.recruit('inf');
+  assert.equal(h.S.current, 'taipei');
+  assert.equal(btn.textContent, '結束回合 ▶');
+  h.requestEndTurn();
+  assert.equal(h.S.current, 'taipei');
+  h.openAttack('taipei', 'newtaipei');
+  assert.equal(btn.textContent, '結束回合 ▶');
+  assert.equal(btn.classList.contains('confirming'), false);
+  assert.equal(get('#attackDialog').hidden, false);
+
+  h.requestEndTurn();
+  assert.equal(h.S.current, 'taipei');
+  h.endPlayerTurn();
+  assert.notEqual(h.S.current, 'taipei');
 });

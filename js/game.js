@@ -214,8 +214,39 @@
     }
   }
 
+  let endTurnConfirm = null;
+
+  function cancelEndTurnConfirm(restore = true) {
+    if (!endTurnConfirm) return;
+    clearTimeout(endTurnConfirm.timer);
+    const label = endTurnConfirm.label;
+    endTurnConfirm = null;
+    const btn = $('#endTurn');
+    btn.classList.remove('confirming');
+    if (restore) btn.textContent = label;
+  }
+
+  // 第一次按「結束回合」只進入確認；再按一次（或 Enter／e）才真正結束。
+  function requestEndTurn() {
+    if (!playerActive()) return;
+    if (endTurnConfirm) {
+      endPlayerTurn();
+      return;
+    }
+    const btn = $('#endTurn');
+    const ready = owned(S.player).filter(id => !S.acted.has(id) && !stunned(id) && count(freshArmy(id)) > 1).length;
+    const token = {};
+    endTurnConfirm = { label: btn.textContent, token };
+    btn.textContent = ready ? `還有 ${ready} 個縣市可出征，確定結束？` : '確定結束回合？';
+    btn.classList.add('confirming');
+    endTurnConfirm.timer = setTimeout(() => {
+      if (endTurnConfirm && endTurnConfirm.token === token) cancelEndTurnConfirm();
+    }, 3000);
+  }
+
   function endPlayerTurn() {
     if (!playerActive()) return;
+    cancelEndTurnConfirm(false);
     saveCheckpoint('auto');
     const gen = S.gen;
     S.sel = null;
@@ -724,6 +755,7 @@
   // 技能設定視窗：只有自己縣市「空著」的自訂欄可以設定
   const canSetSkill = id => S.mode === 'play' && !S.over && S.owner[id] === S.player && !slotsOf(id)[1];
   function openSkillPicker(id, i = 1, captured = false) {
+    cancelEndTurnConfirm();
     if (i !== 1 || !canSetSkill(id)) return false;
     S.picker = { id, i };
     $('#spTitle').innerHTML = captured ? `🚩 攻下 ${cTag(id)}！設定它的自訂技能` : `📜 設定 ${cTag(id)} 的自訂技能`;
@@ -798,6 +830,7 @@
       <small>威脅依目前兵力與加成估算，未涵蓋兵種相剋及隨機戰損。</small></div>`;
   }
   function setPosture(id, key) {
+    cancelEndTurnConfirm();
     if (!playerActive() || S.owner[id] !== S.player || S.acted.has(id) || !Object.hasOwn(POSTURES, key)) return false;
     S.posture[id] = key;
     render();
@@ -808,6 +841,7 @@
   const playerActive = () => S.mode === 'play' && !S.over && S.current === S.player && !S.busy && !S.menuOpen;
 
   async function onCountyClick(id) {
+    cancelEndTurnConfirm();
     if (S.over) return;
     if (S.aim && playerActive()) return aimAt(id);
     if (!playerActive()) { S.sel = id; render(); return; }
@@ -835,6 +869,7 @@
   }
 
   function openAttack(src, tgt, kind = 'county') {
+    cancelEndTurnConfirm();
     S.attack = { src, tgt, kind, sent: Combat.plan(freshArmy(src), S.units, S.sendHalf) };
     $('#attackDialog').hidden = false;
     $('#tip').hidden = true;
@@ -944,6 +979,7 @@
   }
 
   function openTransfer(from, to) {
+    cancelEndTurnConfirm();
     S.tr = { from, to, amt: {} };
     $('#transfer').hidden = false;
     renderTransfer();
@@ -1024,6 +1060,7 @@
   $('#trSwap').addEventListener('click', () => openTransfer(S.tr.to, S.tr.from));
 
   function recruit(k) {
+    cancelEndTurnConfirm();
     const id = S.sel;
     if (!playerActive() || !id || S.owner[id] !== S.player) return;
     const cost = unitCost(k, id);
@@ -1036,6 +1073,7 @@
     render();
   }
   function doResearch(k) {
+    cancelEndTurnConfirm();
     const f = S.player;
     if (!playerActive() || S.research[f][k] >= 5) return;
     const cost = researchCost(f, k);
@@ -1048,6 +1086,7 @@
 
   // ───────── 組建兵種 ─────────
   function openDesigner() {
+    cancelEndTurnConfirm();
     if (!playerActive()) return;
     if (customOf(S.player).length >= MAX_CUSTOM_UNITS) return flash(`最多只能有 ${MAX_CUSTOM_UNITS} 種自組兵種`);
     S.draft = { weapon: 'knife', armor: 'helmet', mount: 'scooter', icon: pick(UNIT_ICONS), name: '' };
@@ -1504,6 +1543,7 @@
   // ───────── 繪製 ─────────
   function render() {
     if (!S.owner) return;
+    cancelEndTurnConfirm();
     const sel = S.sel;
     const canAct = playerActive() && sel && S.owner[sel] === S.player && !S.acted.has(sel) && !stunned(sel) && count(freshArmy(sel)) > 1;
     const reach = S.transferMode && playerActive() && sel ? reachable(sel) : new Set();
@@ -1678,6 +1718,7 @@
 
   // ───────── 視窗 ─────────
   function showStart() {
+    cancelEndTurnConfirm();
     S.menuOpen = true;
     closeActionDialogs();
     refreshSaveButtons();
@@ -1788,7 +1829,7 @@
     const gen = ++S.gen;
     (async () => { await nextTurn(gen); runLoop(gen); })();
   });
-  $('#endTurn').addEventListener('click', endPlayerTurn);
+  $('#endTurn').addEventListener('click', requestEndTurn);
   $('#pauseBtn').addEventListener('click', () => { S.paused = !S.paused; renderPanel(); });
   $('#speed').addEventListener('click', e => {
     const b = e.target.closest('button');
@@ -1812,7 +1853,7 @@
     const pb = e.target.closest('button[data-pick]');
     if (pb && playerActive()) openSkillPicker(S.sel, +pb.dataset.pick);
   });
-  $('#info').addEventListener('change', e => { if (e.target.id === 'halfChk') { S.sendHalf = e.target.checked; renderInfo(); } });
+  $('#info').addEventListener('change', e => { if (e.target.id === 'halfChk') { cancelEndTurnConfirm(); S.sendHalf = e.target.checked; renderInfo(); } });
   $('#research').addEventListener('click', e => { const b = e.target.closest('button[data-k]'); if (b) doResearch(b.dataset.k); });
   document.addEventListener('keydown', e => {
     if (e.key === 'Tab' && !$('#attackDialog').hidden) {
@@ -1829,7 +1870,7 @@
       return;
     }
     if (!$('#attackDialog').hidden || !$('#modal').hidden || !$('#designer').hidden || !$('#transfer').hidden || !$('#skillPicker').hidden || e.target.tagName === 'INPUT') return;
-    if (e.key === 'Enter' || e.key === 'e') endPlayerTurn();
+    if (e.key === 'Enter' || e.key === 'e') requestEndTurn();
     if (e.key === 'Escape') { S.sel = null; S.transferMode = false; clearAim(); render(); }
   });
 
