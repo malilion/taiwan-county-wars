@@ -56,16 +56,16 @@
   const atkBuff = id => S.buff[id]?.atk || 1;
   const defBuff = id => S.buff[id]?.def && S.buff[id].defUntil >= S.day ? S.buff[id].def : 1;
   const stunned = id => (S.stun[id] || 0) >= S.day;
-  const atkMult = (f, id) => byId[id].atk * (1 + 0.12 * S.research[f].atk) * atkBuff(id);
-  const defMult = (f, id) => byId[id].def * (1 + 0.12 * S.research[f].def) * defBuff(id) * (BUILDINGS[S.buildings[id]?.type]?.defense || 1);
+  const atkMult = (f, id) => byId[id].atk * (1 + 0.12 * S.research[f].atk) * atkBuff(id) * POSTURES[S.posture[id]].atk;
+  const defMult = (f, id) => byId[id].def * (1 + 0.12 * S.research[f].def) * defBuff(id) * (BUILDINGS[S.buildings[id]?.type]?.defense || 1) * POSTURES[S.posture[id]].def;
 
   // ───────── 新遊戲 ─────────
   function initState(mode, player) {
     Object.assign(S, {
-      mode, player: player || null, over: false, day: 1, turnIdx: 0, current: null, sel: null, busy: false,
+      mode, player: player || null, over: false, day: 1, turnIdx: 0, current: null, sel: null, busy: false, invasion: null, expeditionPort: null, lastExpedition: null,
       sendHalf: false, acted: new Set(), owner: {}, army: {}, money: {}, research: {}, aggr: {}, paused: false,
-      units: Object.fromEntries(Object.keys(UNITS).map(k => [k, { ...UNITS[k], owner: null }])), unitSeq: 0,
-      buildings: Object.fromEntries(COUNTIES.map(c => [c.id, null])), skillReady: {}, buff: {}, stun: {}, menuOpen: false, transferMode: false, attack: null, lastBattle: null,
+      units: Object.fromEntries(Object.entries({ ...UNITS, ...Invasion.UNITS }).map(([k, u]) => [k, { ...u, owner: null }])), unitSeq: 0,
+      posture: Object.fromEntries(COUNTIES.map(c => [c.id, 'balanced'])), buildings: Object.fromEntries(COUNTIES.map(c => [c.id, null])), skillReady: {}, buff: {}, stun: {}, menuOpen: false, transferMode: false, attack: null, lastBattle: null,
     });
     COUNTIES.forEach(c => {
       S.owner[c.id] = c.id;
@@ -114,6 +114,10 @@
       const f = S.order[S.turnIdx];
       if (owned(f).length) {
         S.current = f;
+        if (f === S.player && S.invasion?.status === 'active') {
+          invasionRaid();
+          if (S.over) { render(); return; }
+        }
         produceBuildings(f);
         const inc = income(f);
         S.money[f] += inc;
@@ -189,6 +193,7 @@
     battleBurst(tgt, r.win ? 'win' : 'block');
     if (r.win) {
       S.owner[tgt] = fa;
+      S.posture[tgt] = 'balanced';
       // 佔領後重新整備，不能跨勢力重複領取即將到期的產兵。
       const facility = S.buildings[tgt];
       if (facility) facility.readyDay = S.day + (BUILDINGS[facility.type].period || 0);
@@ -248,12 +253,118 @@
     if (S.mode === 'play' && !owned(S.player).length) {
       S.over = true;
       showEnd(false, `${byId[S.player].short} 在第 ${S.day} 天滅亡了…`);
-    } else if (a.length === 1) {
+    } else if (a.length === 1 && !S.invasion) {
       S.over = true;
       const w = a[0];
       showEnd(S.mode !== 'play' || w === S.player, `${byId[w].name}（${byId[w].nick}）在第 ${S.day} 天統一全台！`, w);
     }
   }
+
+  // ───────── 統一後的外星入侵 ─────────
+  function startInvasion() {
+    if (S.mode !== 'play' || !S.over || owned(S.player).length !== COUNTIES.length || S.invasion) return;
+    ++S.gen; // Invalidate the final county battle's pending animation/continuation.
+    closeActionDialogs();
+    clearArrows();
+    S.invasion = Invasion.create(S.day, S.gameDiffKey || S.diffKey);
+    S.over = S.busy = false;
+    S.current = S.player;
+    S.turnIdx = S.order.indexOf(S.player);
+    S.acted = new Set();
+    S.expeditionPort = S.sel = 'keelung';
+    hideModal();
+    log('👾 統一之後，外星蟲洞出現！三天後首次空襲。從基隆、高雄、花蓮出征，清除三座前哨，再摧毀母艦。', 'big');
+    render();
+  }
+  function expeditionAllowed(src, site) {
+    return playerActive() && S.invasion?.status === 'active' && Invasion.PORTS.includes(src)
+      && S.owner[src] === S.player && !S.acted.has(src) && !stunned(src) && count(S.army[src]) > 1
+      && Invasion.unlocked(S.invasion, site) && !S.invasion.cleared.includes(site)
+      && (!Invasion.SITES[site].port || Invasion.SITES[site].port === src);
+  }
+  function expeditionOptions(src, site, sent) {
+    return { sent, defenders: S.invasion.sites[site], units: S.units, counters: COUNTERS,
+      attackMult: atkMult(S.player, src), defenseMult: site === 'core' ? 1.25 : 1,
+      defenderAttack: site === 'core' ? 1.2 : 1, attackerMoto: byId[src].moto || 1 };
+  }
+  async function doExpedition(src, site, sent, gen) {
+    if (gen !== S.gen || !expeditionAllowed(src, site) || !Combat.validDeployment(S.army[src], sent, S.units)) return;
+    // Lock before yielding: double clicks cannot launch a second expedition.
+    S.busy = true;
+    S.acted.add(src);
+    for (const k of kinds(sent)) S.army[src][k] -= sent[k];
+    render();
+    await wait(0.9, gen);
+    if (gen !== S.gen || S.over) return;
+    const r = Combat.resolve(expeditionOptions(src, site, sent));
+    S.invasion.sites[site] = r.D;
+    if (S.buff[src]) delete S.buff[src].atk;
+    // Expeditions return to port instead of occupying an off-map base.
+    for (const k of kinds(r.A)) addUnits(S.army[src], k, r.A[k]);
+    if (r.win) {
+      S.invasion.cleared.push(site);
+      S.money[S.player] += 120;
+      S.invasion.shield = Math.min(100, S.invasion.shield + 10);
+    }
+    log(`${r.win ? '🏆' : '🛸'} ${cTag(src)} 出征${Invasion.SITES[site].name}：${r.win ? '摧毀成功，補給 +120 萬、防線 +10' : '未能攻陷，守軍損耗保留'}。我軍折損 ${r.lostA} 人，敵軍折損 ${r.lostD} 人；${count(r.A)} 人返港。`, 'me');
+    S.lastExpedition = { name: Invasion.SITES[site].name, win: r.win, lostA: r.lostA, lostD: r.lostD };
+    S.busy = false;
+    S.sel = src;
+    if (site === 'core' && r.win) {
+      S.invasion.status = 'won';
+      S.over = true;
+      showEnd(true, `第 ${S.day} 天，外星母艦已摧毀！全台防線剩餘 ${S.invasion.shield}%，台灣守衛戰成功。`, S.player);
+    }
+    render();
+  }
+  function invasionRaid() {
+    if (!Invasion.due(S.invasion, S.day)) return;
+    S.invasion.lastRaidDay = S.day;
+    const port = pick(Invasion.PORTS);
+    const r = Combat.resolve({ sent: Invasion.wave(S.invasion), defenders: S.army[port], units: S.units,
+      counters: COUNTERS, attackMult: 1.1, defenseMult: defMult(S.player, port),
+      defenderAttack: 1 + 0.12 * S.research[S.player].atk, defenderMoto: byId[port].moto || 1 });
+    S.army[port] = r.D;
+    const damage = r.win ? 18 : 4;
+    S.invasion.shield = Math.max(0, S.invasion.shield - damage);
+    log(`🚨 外星空襲${cTag(port)}！${r.win ? '守軍遭突破' : '守軍攔截成功'}，守軍折損 ${r.lostD} 人，全台防線 -${damage}%（剩 ${S.invasion.shield}%）。`, 'big');
+    if (!S.invasion.shield) {
+      S.invasion.status = 'lost';
+      S.over = true;
+      showEnd(false, `第 ${S.day} 天，外星空襲突破全台防線。可從先前存檔調整港口駐軍，再次挑戰。`);
+    }
+  }
+  function renderInvasion() {
+    $('#invasionPanel').hidden = !S.invasion;
+    if (!S.invasion) return;
+    const inv = S.invasion;
+    const port = Invasion.PORTS.includes(S.expeditionPort) ? S.expeditionPort : Invasion.PORTS[0];
+    $('#invasionPort').value = port;
+    $('#invasionPortInfo').textContent = `${byId[port].name}駐軍 ${count(S.army[port])} / ${MAX_TROOPS} 人`;
+    $('#focusPortBtn').disabled = S.busy;
+    $('#invasionShield').textContent = `${inv.shield}%`;
+    $('#invasionMeter').style.width = `${inv.shield}%`;
+    const next = Math.max(0, 3 - (S.day - inv.lastRaidDay));
+    $('#invasionStatus').textContent = inv.status === 'won' ? '母艦已摧毀，台灣守衛戰成功！' : inv.status === 'lost' ? '全台防線已被突破。' : `下次空襲：${next} 天後。三港守軍會影響防線損耗。`;
+    $('#invasionSites').innerHTML = Object.entries(Invasion.SITES).map(([id, site]) => {
+      const cleared = inv.cleared.includes(id), unlocked = Invasion.unlocked(inv, id);
+      const reason = cleared ? '已摧毀' : !unlocked ? '先清除三座前哨' : site.port && site.port !== port ? `需從${byId[site.port].short}出征` : S.acted.has(port) ? '本港今日已出征' : stunned(port) ? '港口暫時無法出兵' : count(S.army[port]) < 2 ? '港口兵力不足' : '配置部隊';
+      return `<div class="invasionSite ${cleared ? 'cleared' : ''}"><div><b>${site.icon} ${site.name}</b><small>${cleared ? '外星據點已清除' : `守軍 ${count(inv.sites[id])} 人`}</small></div><button data-site="${id}" ${expeditionAllowed(port, id) ? '' : 'disabled'}>${reason}</button></div>`;
+    }).join('');
+    $('#expeditionResult').textContent = S.lastExpedition ? `${S.lastExpedition.name}：${S.lastExpedition.win ? '摧毀' : '撤回'}，我軍折損 ${S.lastExpedition.lostA}／敵軍折損 ${S.lastExpedition.lostD}` : '先調兵到對應港口，再配置出征部隊；每港每天限一次。';
+  }
+  $('#focusPortBtn').addEventListener('click', () => {
+    if (S.busy || !S.invasion) return;
+    const port = $('#invasionPort').value;
+    S.sel = port; focusCounty(port); render();
+  });
+  $('#invasionBtn').addEventListener('click', startInvasion);
+  $('#invasionPort').addEventListener('change', e => { S.expeditionPort = e.target.value; renderInvasion(); });
+  $('#invasionSites').addEventListener('click', e => {
+    const b = e.target.closest('button[data-site]');
+    const port = $('#invasionPort').value;
+    if (b && expeditionAllowed(port, b.dataset.site)) openAttack(port, b.dataset.site, 'invasion');
+  });
 
   // ───────── 隨機事件 ─────────
   function lose(id, ratio) {
@@ -284,6 +395,10 @@
 
   // ───────── AI ─────────
   async function aiTurn(f, gen) {
+    for (const id of owned(f)) {
+      const threat = enemiesOf(id).reduce((n, e) => Math.max(n, power(S.army[e])), 0);
+      S.posture[id] = threat > power(S.army[id]) * 1.3 ? 'guard' : isFront(id) ? 'assault' : 'balanced';
+    }
     // 研發
     if (S.money[f] > 260 && Math.random() < 0.35) {
       const k = pick(['atk', 'def', 'eco']);
@@ -528,6 +643,33 @@
     }
   }
 
+  function borderThreat(id, defenders = S.army[id]) {
+    const f = S.owner[id];
+    const threats = enemiesOf(id).filter(e => !stunned(e) && count(S.army[e]) > 1).map(e => {
+      const sent = Combat.plan(S.army[e], S.units);
+      return { id: e, troops: count(sent), ratio: power(sent, atkMult(S.owner[e], e)) / Math.max(1, power(defenders, defMult(f, id))) };
+    }).sort((a, b) => b.ratio - a.ratio);
+    const peace = f === S.player && S.day <= S.diff.playerPeace;
+    return { threats, peace, level: !threats.length ? 'none' : threats[0].ratio > 1.4 ? 'high' : threats[0].ratio > 0.85 ? 'mid' : 'low' };
+  }
+  function defenseHtml(id, canEdit) {
+    const f = S.owner[id], posture = POSTURES[S.posture[id]], risk = borderThreat(id);
+    const label = { none: '無相鄰敵軍', low: '威脅較低', mid: '需要留意', high: '防線薄弱' }[risk.level];
+    const detail = risk.peace ? `和平期剩 ${S.diff.playerPeace - S.day + 1} 天，之後 AI 可能進攻。`
+      : risk.threats.length ? `最需留意${byId[risk.threats[0].id].short}，目前可派約 ${risk.threats[0].troops} 人。` : S.invasion ? '港口仍可能遭到外星空襲。' : '目前沒有可出兵的相鄰敵軍。';
+    return `<div class="defenseBox"><div class="defenseHead"><b>🛡️ 駐防與警戒</b><span class="risk-${risk.level}">${risk.peace ? '🕊️ 和平期' : label}</span></div>
+      <p>駐軍 ${count(S.army[id])} 人・防禦加成 ×${defMult(f, id).toFixed(2)}</p><p class="hint">${detail}</p>
+      <div class="postures">${Object.entries(POSTURES).map(([key, spec]) => `<button data-posture="${key}" class="${S.posture[id] === key ? 'on' : ''}" ${!canEdit || S.acted.has(id) ? 'disabled' : ''}>${spec.icon} ${spec.name}</button>`).join('')}</div>
+      <small>${posture.desc}。${S.acted.has(id) && f === S.player ? '今日已出征，姿態鎖定至下回合。' : '出征後無法更換姿態，需保留兵力迎戰。'}</small>
+      <small>威脅依目前兵力與加成估算，未涵蓋兵種相剋及隨機戰損。</small></div>`;
+  }
+  function setPosture(id, key) {
+    if (!playerActive() || S.owner[id] !== S.player || S.acted.has(id) || !Object.hasOwn(POSTURES, key)) return false;
+    S.posture[id] = key;
+    render();
+    return true;
+  }
+
   // ───────── 玩家操作 ─────────
   const playerActive = () => S.mode === 'play' && !S.over && S.current === S.player && !S.busy && !S.menuOpen;
 
@@ -555,8 +697,8 @@
     S.attack = S.tr = S.picker = S.draft = null;
   }
 
-  function openAttack(src, tgt) {
-    S.attack = { src, tgt, sent: Combat.plan(S.army[src], S.units, S.sendHalf) };
+  function openAttack(src, tgt, kind = 'county') {
+    S.attack = { src, tgt, kind, sent: Combat.plan(S.army[src], S.units, S.sendHalf) };
     $('#attackDialog').hidden = false;
     $('#tip').hidden = true;
     renderAttack();
@@ -565,18 +707,28 @@
   function renderAttack() {
     const { src, tgt, sent } = S.attack;
     const total = count(sent), reserve = count(S.army[src]) - total;
-    $('#attackTitle').textContent = `${byId[src].short} → ${byId[tgt].short}`;
+    const expedition = S.attack.kind === 'invasion';
+    const targetName = expedition ? Invasion.SITES[tgt].name : byId[tgt].short;
+    const options = expedition ? expeditionOptions(src, tgt, sent) : combatOptions(src, tgt, sent);
+    $('#attackTitle').textContent = `${byId[src].short} → ${targetName}`;
+    $('#attackHint').textContent = expedition ? '每港每日出征一次；作戰後存活部隊返港，前哨守軍戰損保留。' : '每個縣市每日出兵一次；失敗後殘兵撤回，攻陷後駐守新領土。';
     $('#attackForces').innerHTML = `<div><small>出征部隊</small><b>${total}<em> 人</em></b><span>本土留守 ${reserve} 人</span></div>
-      <span class="versus">VS</span><div><small>${byId[S.owner[tgt]].short}守軍</small><b>${count(S.army[tgt])}<em> 人</em></b><span>防禦加成 ×${defMult(S.owner[tgt], tgt).toFixed(2)}</span></div>`;
+      <span class="versus">VS</span><div><small>${expedition ? '外星' : byId[S.owner[tgt]].short}守軍</small><b>${count(options.defenders)}<em> 人</em></b><span>防禦加成 ×${options.defenseMult.toFixed(2)}</span></div>`;
     $('#attackRows').innerHTML = kinds(S.army[src]).map(k => `<div class="deployRow"><span>${unitIcon(k)} ${esc(U(k).name)}<small>${UNIT_CLASSES[U(k).cls]}・現有 ${S.army[src][k]}</small></span>
       <div class="deployControl"><button data-unit="${k}" data-delta="-1" aria-label="減少${esc(U(k).name)}" ${!sent[k] ? 'disabled' : ''}>−</button>
-      <b>${sent[k] || 0}</b><button data-unit="${k}" data-delta="1" aria-label="增加${esc(U(k).name)}" ${sent[k] >= S.army[src][k] || reserve <= 1 ? 'disabled' : ''}>＋</button></div></div>`).join('');
+      <input class="unitAmount" type="number" min="0" max="${Math.min(S.army[src][k], (sent[k] || 0) + reserve - 1)}" value="${sent[k] || 0}" data-amount="${k}" aria-label="${esc(U(k).name)}出征人數"><button data-unit="${k}" data-delta="1" aria-label="增加${esc(U(k).name)}" ${sent[k] >= S.army[src][k] || reserve <= 1 ? 'disabled' : ''}>＋</button></div></div>`).join('');
     const valid = Combat.validDeployment(S.army[src], sent, S.units);
-    const estimate = valid ? Combat.estimate(combatOptions(src, tgt, sent)) : null;
+    const estimate = valid ? Combat.estimate(options) : null;
     $('#attackEstimate').innerHTML = estimate ? `<div class="estimateTop"><span>預估攻陷機率</span><b class="${estimate.chance >= 65 ? 'hl-g' : 'hl-r'}">${estimate.chance}%</b></div>
       <div class="estimateBar"><i style="width:${estimate.chance}%"></i></div>
       <p>平均折損：我軍 ${estimate.lostA} 人／守軍 ${estimate.lostD} 人</p>
       <small>依目前兵種相剋、研發、地域與技能加成模擬 160 次；實戰仍有隨機性。</small>` : '<p>請選擇至少 1 名出征部隊，並留 1 人守家。</p>';
+    $('#deploymentSize').max = Math.max(0, count(S.army[src]) - 1);
+    $('#deploymentSize').value = total;
+    const reserveArmy = Object.fromEntries(kinds(S.army[src]).map(k => [k, S.army[src][k] - (sent[k] || 0)]));
+    const risk = borderThreat(src, reserveArmy);
+    $('#reserveWarning').textContent = `${reserve} 人留守${byId[src].short}。` + (risk.peace ? '目前仍在和平期。' : risk.level === 'high' ? '⚠️ 鄰國兵力明顯超過留守部隊，可能遭到反攻。' : risk.threats.length ? '鄰國可能反攻，請搭配駐防與要塞。' : S.invasion ? '請保留守軍應對外星空襲。' : '目前無相鄰敵軍。');
+    $('#reserveWarning').className = 'reserveWarning' + (!risk.peace && risk.level === 'high' ? ' danger' : '');
     $('#attackConfirm').disabled = !valid;
     $('#attackConfirm').textContent = `⚔️ 確認出征 ${total} 人`;
   }
@@ -588,16 +740,37 @@
     sent[k] = Math.max(0, Math.min(S.army[src][k], (sent[k] || 0) + delta));
     renderAttack();
   });
+  $('#attackRows').addEventListener('change', e => {
+    const k = e.target.dataset.amount;
+    if (!S.attack || !k || !Object.hasOwn(S.army[S.attack.src], k)) return;
+    const { src, sent } = S.attack;
+    const other = count(sent) - (sent[k] || 0);
+    const value = Number(e.target.value);
+    sent[k] = Math.max(0, Math.min(S.army[src][k], count(S.army[src]) - 1 - other, Number.isFinite(value) ? Math.floor(value) : 0));
+    renderAttack();
+  });
+  $('#deploymentSize').addEventListener('change', e => {
+    if (!S.attack) return;
+    S.attack.sent = Combat.planSize(S.army[S.attack.src], S.units, e.target.value);
+    renderAttack();
+  });
   $('#attackPresets').addEventListener('click', e => {
     const b = e.target.closest('button[data-plan]');
     if (!b || !S.attack) return;
-    S.attack.sent = b.dataset.plan === 'none' ? {} : Combat.plan(S.army[S.attack.src], S.units, b.dataset.plan === 'half');
+    S.attack.sent = /^\d+$/.test(b.dataset.plan) ? Combat.planSize(S.army[S.attack.src], S.units, Number(b.dataset.plan)) : b.dataset.plan === 'none' ? {} : Combat.plan(S.army[S.attack.src], S.units, b.dataset.plan === 'half');
     renderAttack();
   });
   $('#attackCancel').addEventListener('click', () => { $('#attackDialog').hidden = true; S.attack = null; });
   $('#attackConfirm').addEventListener('click', async () => {
     if (!playerActive() || !S.attack) return;
-    const { src, tgt, sent } = S.attack;
+    const { src, tgt, sent, kind } = S.attack;
+    if (kind === 'invasion') {
+      if (!expeditionAllowed(src, tgt) || !Combat.validDeployment(S.army[src], sent, S.units)) return;
+      $('#attackDialog').hidden = true;
+      S.attack = null;
+      await doExpedition(src, tgt, sent, S.gen);
+      return;
+    }
     if (S.owner[src] !== S.player || S.owner[tgt] === S.player || S.acted.has(src) || stunned(src) || !Combat.validDeployment(S.army[src], sent, S.units)) return;
     $('#attackDialog').hidden = true;
     S.attack = null;
@@ -831,6 +1004,9 @@
     renderInfo();
     renderTip();
     renderBattleReport();
+    renderInvasion();
+    $('#campaignGoalName').textContent = S.invasion ? '👾 台灣守衛戰' : '🏁 統一全台';
+    $('#campaignGoalProgress').textContent = S.invasion ? `${S.invasion.cleared.length} / 4 據點` : `${S.player ? owned(S.player).length : 0} / 22 縣市`;
     $('#saveBtn').disabled = !playerActive();
     if (playerActive()) saveCheckpoint('auto');
   }
@@ -897,6 +1073,7 @@
         <div class="rbtns">${isMineSel ? `<button data-skill="${i}" ${block ? 'disabled' : ''}>${block || '發動'}</button>` : skillWait(id, i) ? `<span class="cdTag">冷卻 ${skillWait(id, i)} 天</span>` : ''}
         ${canEdit && i > 0 ? `<button class="swap" data-pick="${i}">更換</button>` : ''}</div></div>`;
     }).join('') + (status.length ? `<div class="rstatus">${status.join('　')}</div>` : '');
+    html += defenseHtml(id, isMineSel);
     html += facilityHtml(id, isMineSel);
     if (isMineSel) {
       const acted = S.acted.has(id);
@@ -991,6 +1168,8 @@
     $('#startView').hidden = true;
     $('#endView').hidden = false;
     $('#endTitle').textContent = S.mode === 'play' ? (win ? '🎉 統一全台！' : '💀 你被滅了') : `👑 ${byId[winner].short} 稱霸台灣`;
+    if (S.invasion) $('#endTitle').textContent = win ? '🌏 台灣守衛戰成功！' : '👾 防線遭突破';
+    $('#invasionBtn').hidden = !(win && S.mode === 'play' && owned(S.player).length === COUNTIES.length && !S.invasion);
     $('#endText').textContent = text;
     $('#watchBtn').hidden = !(S.mode === 'play' && !win && alive().length > 1);
     if (winner) $('#endTitle').style.color = byId[winner].color; else $('#endTitle').style.color = '';
@@ -999,8 +1178,8 @@
 
   // Only save at a stable player turn, never a partially resolved battle/AI turn.
   const saveRules = { counties: COUNTIES.map(c => c.id), skills: ALL_SKILLS, difficulties: DIFFICULTY,
-    baseUnits: Object.keys(UNITS), classes: UNIT_KEYS, buildings: BUILDINGS, maxCustom: MAX_CUSTOM_UNITS,
-    icons: [...UNIT_ICONS, ...Object.values(UNITS).map(u => u.icon)], sprites: Object.values(UNITS).map(u => u.sprite) };
+    enemyUnits: Invasion.UNITS, validateInvasion: Invasion.validate, baseUnits: Object.keys(UNITS), classes: UNIT_KEYS, buildings: BUILDINGS, maxCustom: MAX_CUSTOM_UNITS,
+    icons: [...UNIT_ICONS, ...Object.values({ ...UNITS, ...Invasion.UNITS }).map(u => u.icon)], sprites: Object.values(UNITS).map(u => u.sprite) };
   let lastAuto = '', storageWarned = false;
   function saveCheckpoint(slot, notify = false) {
     if (!playerActive()) return false;
@@ -1040,7 +1219,7 @@
       const save = GameSaves.read(localStorage, slot, saveRules);
       ++S.gen;
       closeActionDialogs();
-      Object.assign(S, save.data, { diff: DIFFICULTY[save.data.diffKey], gameDiffKey: save.data.diffKey, over: false, busy: false, paused: false, transferMode: false, hover: null, lastBattle: null });
+      Object.assign(S, save.data, { diff: DIFFICULTY[save.data.diffKey], gameDiffKey: save.data.diffKey, over: false, busy: false, paused: false, transferMode: false, hover: null, lastBattle: null, lastExpedition: null, expeditionPort: null });
       lastAuto = '';
       $('#log').replaceChildren();
       for (const text of save.logs) { const div = document.createElement('div'); div.className = 'entry'; div.textContent = text; $('#log').appendChild(div); }
@@ -1086,6 +1265,8 @@
     document.querySelectorAll('#speed button').forEach(x => x.classList.toggle('on', x === b));
   });
   $('#info').addEventListener('click', e => {
+    const stance = e.target.closest('button[data-posture]');
+    if (stance) setPosture(S.sel, stance.dataset.posture);
     const build = e.target.closest('button[data-build]');
     if (build && playerActive() && S.owner[S.sel] === S.player) { buildFacility(S.sel, build.dataset.build); render(); }
     if (e.target.closest('#demolishBtn') && playerActive() && S.owner[S.sel] === S.player) {

@@ -395,3 +395,39 @@ button:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
 .facilityPicker summary { cursor: pointer; }
 .facilityPicker button { width: 100%; text-align: left; margin-top: 8px; padding: 10px; }
 .facilityPicker button b { font-size: 12px; }
+
+/* Post-unification campaign */
+#invasionPanel { border-color: #875fc0; background: linear-gradient(150deg, #251b3d, #13213b 70%); }
+.invasionHead { display: flex; justify-content: space-between; align-items: center; }
+.invasionHead h3 { margin: 0; font-size: 18px; }
+.invasionHead b { color: var(--green); font-size: 26px; }
+.invasionTrack { height: 8px; border-radius: 8px; overflow: hidden; background: var(--bg); margin-top: 12px; }
+.invasionTrack i { display: block; height: 100%; background: linear-gradient(90deg, #a987ed, #06d6a0); transition: width .3s; }
+.portPicker { display: flex; align-items: center; gap: 10px; font-size: 13px; margin: 12px 0; }
+.portPicker select { flex: 1; min-width: 0; font: inherit; color: var(--text); background: var(--panel2); border: 1px solid var(--line); border-radius: 8px; padding: 8px; }
+.invasionSite { display: flex; align-items: center; justify-content: space-between; gap: 6px; padding: 10px 0; border-top: 1px solid var(--line); }
+.invasionSite b { font-size: 13px; }
+.invasionSite small { display: block; color: var(--muted); font-size: 11px; margin-top: 4px; }
+.invasionSite button { font-size: 11px; padding: 8px; }
+.invasionSite.cleared b { color: var(--green); }
+
+.portInfo { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 10px; color: var(--muted); font-size: 11px; }
+.portInfo button { font-size: 11px; }
+
+.deploymentTotal { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; font-size: 13px; margin-bottom: 12px; }
+.deploymentTotal small { flex-basis: 100%; color: var(--muted); font-size: 11px; }
+.deploymentTotal input, .unitAmount { font: inherit; color: var(--text); text-align: center; background: var(--bg); border: 1px solid var(--line); border-radius: 6px; padding: 7px; width: 70px; }
+.unitAmount { width: 52px; padding: 6px 2px; }
+.attackPresets { flex-wrap: wrap; }
+.attackPresets button { flex: 1 0 25%; }
+.reserveWarning { padding: 10px; border-radius: 8px; background: #183746; color: #a9d5dc; font-size: 12px; line-height: 1.7; }
+.reserveWarning.danger { background: #402433; color: #ffadc0; border: 1px solid #834159; }
+.defenseBox { padding: 12px; margin-top: 12px; border: 1px solid var(--line); border-radius: 10px; }
+.defenseHead { display: flex; align-items: center; justify-content: space-between; gap: 8px; font-size: 12px; }
+.defenseBox p { margin: 6px 0; font-size: 12px; }
+.defenseBox small { display: block; color: var(--muted); font-size: 11px; line-height: 1.7; margin-top: 6px; }
+.postures { display: flex; gap: 6px; margin-top: 10px; }
+.postures button { flex: 1; padding: 7px 4px; font-size: 12px; }
+.postures button.on { border-color: var(--accent); color: var(--accent); }
+.risk-high { color: #ff8fa8; } .risk-mid { color: var(--accent); } .risk-low, .risk-none { color: var(--green); }
+@media (max-width: 480px) { .deployControl { gap: 4px; } .deployRow { font-size: 13px; } }

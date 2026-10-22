@@ -1,7 +1,7 @@
 // Versioned local checkpoints; loading returns fresh data, never DOM/HTML.
 const GameSaves = (() => {
   const PREFIX = 'taiwan-war:v1:';
-  const FIELDS = ['mode', 'player', 'diffKey', 'day', 'turnIdx', 'current', 'sel', 'sendHalf', 'owner', 'army', 'money', 'research', 'aggr', 'units', 'unitSeq', 'skillReady', 'buff', 'stun', 'order', 'slots', 'buildings'];
+  const FIELDS = ['mode', 'player', 'diffKey', 'day', 'turnIdx', 'current', 'sel', 'sendHalf', 'owner', 'army', 'money', 'research', 'aggr', 'units', 'unitSeq', 'skillReady', 'buff', 'stun', 'order', 'slots', 'buildings', 'invasion', 'posture'];
   const integer = (n, max = 1000000000) => Number.isInteger(n) && n >= 0 && n <= max;
   const record = v => v && typeof v === 'object' && !Array.isArray(v) && Object.keys(v).every(k => !['__proto__', 'constructor', 'prototype'].includes(k));
   function encode(state, logs = []) {
@@ -23,18 +23,23 @@ const GameSaves = (() => {
       || new Set(s.order).size !== ids.length || !s.order.every(hasId) || s.order[s.turnIdx] !== s.player
       || (s.sel !== null && !hasId(s.sel)) || typeof s.sendHalf !== 'boolean'
       || !integer(s.unitSeq, ids.length * rules.maxCustom) || !record(s.units)) throw new Error('存檔格式不相容');
-    if (!rules.baseUnits.every(k => Object.hasOwn(s.units, k)) || Object.keys(s.units).length > rules.baseUnits.length + ids.length * rules.maxCustom) throw new Error('兵種資料不完整');
+    s.posture ??= Object.fromEntries(ids.map(id => [id, 'balanced']));
+    s.invasion ??= null; // Existing v1 county saves remain loadable.
+    const enemyUnits = rules.enemyUnits || {};
+    for (const [key, unit] of Object.entries(enemyUnits)) if (!Object.hasOwn(s.units, key)) s.units[key] = { ...unit };
+    if (!rules.baseUnits.every(k => Object.hasOwn(s.units, k)) || Object.keys(s.units).length > rules.baseUnits.length + Object.keys(enemyUnits).length + ids.length * rules.maxCustom) throw new Error('兵種資料不完整');
     for (const [k, u] of Object.entries(s.units)) {
-      if (!record(u) || (!rules.baseUnits.includes(k) && !/^u[1-9]\d*$/.test(k))
-        || (!rules.baseUnits.includes(k) && Number(k.slice(1)) > s.unitSeq)
+      if (!record(u) || (!rules.baseUnits.includes(k) && !Object.hasOwn(enemyUnits, k) && !/^u[1-9]\d*$/.test(k))
+        || (!rules.baseUnits.includes(k) && !Object.hasOwn(enemyUnits, k) && Number(k.slice(1)) > s.unitSeq)
         || !(rules.classes || rules.baseUnits).includes(u.cls) || !(u.owner === null || hasId(u.owner))
         || typeof u.name !== 'string' || u.name.length > 50 || typeof u.desc !== 'string' || u.desc.length > 200
         || !integer(u.atk, 1000) || u.atk < 1 || !integer(u.hp, 1000) || u.hp < 1
         || !integer(u.cost, 10000) || u.cost < 1 || !rules.icons.includes(u.icon)
         || (u.sprite !== undefined && !rules.sprites.includes(u.sprite))) throw new Error('兵種資料損毀');
     }
-    for (const field of ['owner', 'army', 'money', 'research', 'aggr', 'buildings']) if (!allIds(s[field])) throw new Error('縣市資料不完整');
+    for (const field of ['owner', 'army', 'money', 'research', 'aggr', 'buildings', 'posture']) if (!allIds(s[field])) throw new Error('縣市資料不完整');
     for (const id of ids) {
+      if (!['balanced', 'guard', 'assault'].includes(s.posture[id])) throw new Error('駐防姿態損毀');
       const facility = s.buildings[id];
       if (facility !== null && (!record(facility) || !Object.hasOwn(rules.buildings, facility.type) || !integer(facility.readyDay))) throw new Error('設施資料損毀');
       if (!hasId(s.owner[id]) || !record(s.army[id]) || Object.entries(s.army[id]).some(([k, n]) => !Object.hasOwn(s.units, k) || !integer(n, 25))
@@ -42,7 +47,8 @@ const GameSaves = (() => {
         || !record(s.research[id]) || !['atk', 'def', 'eco'].every(k => integer(s.research[id][k], 5))
         || !Number.isFinite(s.aggr[id]) || s.aggr[id] < 1 || s.aggr[id] > 2) throw new Error('縣市數值損毀');
     }
-    if (!ids.some(id => s.owner[id] === s.player) || new Set(Object.values(s.owner)).size < 2
+    if (s.invasion !== null && (!rules.validateInvasion?.(s.invasion, s.day) || !ids.every(id => s.owner[id] === s.player))) throw new Error('入侵進度損毀');
+    if (!ids.some(id => s.owner[id] === s.player) || (new Set(Object.values(s.owner)).size < 2 && s.invasion === null)
       || !Array.isArray(s.acted) || !s.acted.every(hasId) || !Array.isArray(s.library) || !s.library.every(hasSkill)
       || !record(s.slots) || !record(s.skillReady) || !record(s.buff) || !record(s.stun)) throw new Error('回合資料損毀');
     for (const [id, slots] of Object.entries(s.slots)) {

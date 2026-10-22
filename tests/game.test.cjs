@@ -33,7 +33,7 @@ function fixture() {
     MAP_W: 640, MAP_H: 830, svgEl: () => new Element(), buildMinimap() {},
   });
   vm.runInContext(fs.readFileSync('js/data.js', 'utf8'), context);
-  for (const file of ['combat', 'saves']) vm.runInContext(fs.readFileSync(`js/${file}.js`, 'utf8'), context);
+  for (const file of ['combat', 'invasion', 'saves']) vm.runInContext(fs.readFileSync(`js/${file}.js`, 'utf8'), context);
   vm.runInContext(`function buildMap() {
     const make = () => document.createElement('g');
     return { groups: Object.fromEntries(COUNTIES.map(c => [c.id, make()])),
@@ -44,7 +44,7 @@ function fixture() {
   }`, context);
   let source = fs.readFileSync('js/game.js', 'utf8');
   const at = source.lastIndexOf('})();');
-  source = source.slice(0, at) + `Object.assign(harness, { S, initState, runLoop, endPlayerTurn, doAttack, saveCheckpoint, loadCheckpoint, saveRules, render, buildFacility, produceBuildings, income, defMult, openAttack, showStart, newGame, recruit, confirmTransfer });` + source.slice(at);
+  source = source.slice(0, at) + `Object.assign(harness, { S, initState, runLoop, endPlayerTurn, doAttack, saveCheckpoint, loadCheckpoint, saveRules, render, buildFacility, produceBuildings, income, defMult, openAttack, showStart, newGame, recruit, confirmTransfer, checkEnd, startInvasion, doExpedition, invasionRaid, expeditionAllowed, borderThreat, setPosture, atkMult, aiTurn });` + source.slice(at);
   vm.runInContext(source, context);
   const h = context.harness;
   h.initState('play', 'taipei');
@@ -202,4 +202,219 @@ test('a full AI day completes and produces a valid next-player checkpoint', asyn
   const save = GameSaves.read(f.context.localStorage, 'auto', h.saveRules);
   assert.equal(save.data.day, 2); assert.equal(save.data.current, 'taipei');
   for (const army of Object.values(h.S.army)) assert.ok(Combat.count(army) <= 25);
+});
+
+const Invasion = require('../js/invasion.js');
+function unifiedFixture() {
+  const f = fixture(), s = f.h.S;
+  for (const id of Object.keys(s.owner)) {
+    s.owner[id] = s.player;
+    s.slots[id] = [id, null];
+    s.library.add(id);
+  }
+  return f;
+}
+test('unification offers an optional final campaign without replacing the county victory', () => {
+  const { h, get } = unifiedFixture();
+  h.checkEnd();
+  assert.equal(h.S.over, true); assert.equal(h.S.invasion, null);
+  assert.equal(get('#invasionBtn').hidden, false);
+  const generation = h.S.gen;
+  h.startInvasion();
+  assert.equal(h.S.over, false); assert.equal(h.S.gen, generation + 1);
+  assert.equal(h.S.invasion.shield, 100); assert.equal(h.S.current, 'taipei');
+  assert.ok(h.S.acted.size === 0);
+});
+
+test('invasion cannot start before unification or start twice', () => {
+  const f = fixture(); f.h.S.over = true; f.h.startInvasion();
+  assert.equal(f.h.S.invasion, null);
+  const { h } = unifiedFixture(); h.checkEnd(); h.startInvasion();
+  const inv = h.S.invasion; h.startInvasion(); assert.equal(h.S.invasion, inv);
+});
+test('base locks and departure ports enforce the final campaign sequence', () => {
+  const { h } = unifiedFixture(); h.checkEnd(); h.startInvasion();
+  h.S.army.keelung = { elite: 24 }; h.S.army.kaohsiung = { elite: 24 };
+  assert.equal(h.expeditionAllowed('keelung', 'core'), false);
+  assert.equal(h.expeditionAllowed('kaohsiung', 'north'), false);
+  assert.equal(h.expeditionAllowed('keelung', 'north'), true);
+  h.S.acted.add('keelung'); assert.equal(h.expeditionAllowed('keelung', 'north'), false);
+  h.S.acted.clear(); h.S.stun.keelung = h.S.day;
+  assert.equal(h.expeditionAllowed('keelung', 'north'), false);
+});
+test('a successful expedition returns survivors, gives one reward and consumes one action', async () => {
+  const f = unifiedFixture(), { h } = f; h.checkEnd(); h.startInvasion();
+  h.S.army.keelung = { elite: 25 }; h.S.invasion.sites.north = { invader: 1 };
+  h.S.invasion.shield = 70;
+  const money = h.S.money.taipei;
+  const battle = h.doExpedition('keelung', 'north', { elite: 24 }, h.S.gen);
+  const second = h.doExpedition('keelung', 'north', { elite: 24 }, h.S.gen);
+  await f.flush(); await battle; await second;
+  assert.ok(h.S.invasion.cleared.includes('north'));
+  assert.equal(h.S.money.taipei, money + 120); assert.equal(h.S.invasion.shield, 80);
+  assert.ok(Combat.count(h.S.army.keelung) <= 25);
+  assert.ok(h.S.acted.has('keelung')); assert.equal(h.S.busy, false);
+  h.S.acted.clear(); assert.equal(h.expeditionAllowed('keelung', 'north'), false);
+});
+test('failed expeditions preserve enemy casualties for the next sortie', async () => {
+  const f = unifiedFixture(), { h } = f; h.checkEnd(); h.startInvasion();
+  h.S.army.keelung = { art: 6, inf: 1 }; h.S.invasion.sites.north = { overlord: 20 };
+  const battle = h.doExpedition('keelung', 'north', { art: 6 }, h.S.gen);
+  await f.flush(); await battle;
+  assert.equal(h.S.invasion.cleared.length, 0);
+  assert.ok(Combat.count(h.S.invasion.sites.north) < 20);
+  assert.equal(h.S.army.keelung.inf, 1);
+});
+test('raids allow three preparation days, happen once per scheduled day and honor defenses', () => {
+  const { h } = unifiedFixture(); h.checkEnd(); h.startInvasion();
+  for (const port of Invasion.PORTS) h.S.army[port] = {};
+  h.S.day += 2; h.invasionRaid(); assert.equal(h.S.invasion.shield, 100);
+  h.S.day += 1; h.invasionRaid(); assert.equal(h.S.invasion.shield, 82);
+  h.invasionRaid(); assert.equal(h.S.invasion.shield, 82);
+  for (const port of Invasion.PORTS) { h.S.army[port] = { elite: 25 }; h.S.buildings[port] = { type: 'fort', readyDay: 1 }; }
+  h.S.research.taipei.atk = h.S.research.taipei.def = 5;
+  h.S.day += 3; h.invasionRaid(); assert.equal(h.S.invasion.shield, 78);
+});
+test('shield collapse shows a final defeat and leaves the previous checkpoint available', () => {
+  const { h, get, storage } = unifiedFixture(); h.checkEnd(); h.startInvasion();
+  const previous = storage.get('taiwan-war:v1:auto');
+  for (const port of Invasion.PORTS) h.S.army[port] = {};
+  h.S.invasion.shield = 10; h.S.day += 3; h.invasionRaid();
+  assert.equal(h.S.over, true); assert.equal(h.S.invasion.status, 'lost');
+  assert.match(get('#endTitle').textContent, /防線/);
+  assert.equal(storage.get('taiwan-war:v1:auto'), previous);
+});
+test('destroying the core ends the final campaign with a distinct victory', async () => {
+  const f = unifiedFixture(), { h, get } = f; h.checkEnd(); h.startInvasion();
+  h.S.invasion.cleared = ['north', 'south', 'east'];
+  for (const id of h.S.invasion.cleared) h.S.invasion.sites[id] = {};
+  h.S.invasion.sites.core = { invader: 1 }; h.S.army.keelung = { elite: 25 };
+  const battle = h.doExpedition('keelung', 'core', { elite: 24 }, h.S.gen);
+  await f.flush(); await battle;
+  assert.equal(h.S.invasion.status, 'won'); assert.equal(h.S.over, true);
+  assert.match(get('#endTitle').textContent, /守衛戰成功/);
+  assert.equal(get('#invasionBtn').hidden, true);
+});
+test('final campaign checkpoint round trip preserves raid timer, damage, bases and actions', () => {
+  const { h } = unifiedFixture(); h.checkEnd(); h.startInvasion();
+  h.S.day += 4; h.S.invasion.lastRaidDay += 3; h.S.invasion.shield = 64;
+  h.S.invasion.cleared.push('north'); h.S.invasion.sites.north = {};
+  h.S.invasion.sites.south.invader = 2; h.S.acted.add('keelung');
+  assert.ok(h.saveCheckpoint('manual'));
+  h.S.invasion.shield = 99; h.loadCheckpoint('manual');
+  assert.equal(h.S.invasion.shield, 64); assert.equal(h.S.invasion.sites.south.invader, 2);
+  assert.equal(h.S.invasion.lastRaidDay, 4); assert.ok(h.S.acted.has('keelung'));
+});
+test('old v1 saves migrate enemy definitions; malformed invasion progress is rejected', () => {
+  const { h } = fixture(), old = JSON.parse(GameSaves.encode(h.S));
+  delete old.data.invasion;
+  for (const key of Object.keys(Invasion.UNITS)) delete old.data.units[key];
+  const loaded = GameSaves.decode(JSON.stringify(old), h.saveRules);
+  assert.equal(loaded.data.invasion, null); assert.ok(loaded.data.units.invader);
+  const f = unifiedFixture(); f.h.checkEnd(); f.h.startInvasion();
+  const valid = JSON.parse(GameSaves.encode(f.h.S));
+  for (const corrupt of [s => s.invasion.shield = -1, s => s.invasion.cleared.push('core'),
+    s => s.invasion.sites.core.invader = 99, s => s.invasion.lastRaidDay = s.day + 1,
+    s => s.invasion.cleared.push('north'), s => s.owner.keelung = 'keelung']) {
+    const copy = structuredClone(valid); corrupt(copy.data);
+    assert.throws(() => GameSaves.decode(JSON.stringify(copy), f.h.saveRules));
+  }
+});
+test('a pending expedition cannot damage a newly started game', async () => {
+  const f = unifiedFixture(), { h } = f; h.checkEnd(); h.startInvasion();
+  h.S.army.keelung = { elite: 25 };
+  const old = h.doExpedition('keelung', 'north', { elite: 24 }, h.S.gen);
+  ++h.S.gen; h.initState('play', 'tainan');
+  const armies = JSON.stringify(h.S.army);
+  await f.flush(); await old;
+  assert.equal(h.S.invasion, null); assert.equal(JSON.stringify(h.S.army), armies);
+});
+
+test('the expedition confirmation button uses off-map battle rules', async () => {
+  const f = unifiedFixture(), { h, get } = f; h.checkEnd(); h.startInvasion();
+  h.S.army.keelung = { elite: 25 }; h.S.invasion.sites.north = { invader: 1 };
+  h.openAttack('keelung', 'north', 'invasion');
+  assert.match(get('#attackTitle').textContent, /北方蟲洞/);
+  assert.match(get('#attackHint').textContent, /返港/);
+  const confirm = get('#attackConfirm').handlers.click();
+  await f.flush(); await confirm;
+  assert.equal(get('#attackDialog').hidden, true);
+  assert.ok(h.S.invasion.cleared.includes('north'));
+});
+test('full final-campaign turns advance raid timing without duplicating tax or air raids', async () => {
+  const f = unifiedFixture(), { h } = f; h.checkEnd(); h.startInvasion();
+  for (let turn = 0; turn < 3; turn++) {
+    h.endPlayerTurn();
+    for (let i = 0; i < 30 && h.S.current !== 'taipei'; i++) await f.flush();
+  }
+  assert.equal(h.S.day, 4); assert.equal(h.S.current, 'taipei');
+  assert.equal(h.S.invasion.lastRaidDay, 4);
+  const save = GameSaves.read(f.context.localStorage, 'auto', h.saveRules);
+  assert.equal(save.data.invasion.lastRaidDay, 4);
+  const money = h.S.money.taipei, shield = h.S.invasion.shield;
+  h.loadCheckpoint('auto');
+  assert.equal(h.S.money.taipei, money); assert.equal(h.S.invasion.shield, shield);
+});
+
+test('exact-size allocation honors the chosen number and keeps one soldier home', () => {
+  const army = { inf: 9, moto: 5, gen: 3, art: 2 };
+  for (const n of [0, 1, 5, 10, 15, 18, 99, -1, 3.7]) {
+    const sent = Combat.planSize(army, units, n);
+    assert.equal(Combat.count(sent), Math.max(0, Math.min(18, Math.floor(n))));
+    for (const [k, count] of Object.entries(sent)) assert.ok(count >= 0 && count <= army[k]);
+  }
+  assert.equal(Combat.count(Combat.planSize({ inf: 1 }, units, 5)), 0);
+});
+test('total and individual number inputs clamp deployment while updating remaining defense', () => {
+  const { h, get } = fixture(); h.S.diff.playerPeace = 0;
+  h.S.army.taipei = { inf: 9, moto: 5 }; h.openAttack('taipei', 'newtaipei');
+  get('#deploymentSize').handlers.change({ target: { value: '5' } });
+  assert.equal(Combat.count(h.S.attack.sent), 5);
+  assert.match(get('#reserveWarning').textContent, /9 人留守/);
+  get('#attackRows').handlers.change({ target: { dataset: { amount: 'inf' }, value: '999' } });
+  assert.ok(Combat.count(h.S.attack.sent) <= 13);
+  assert.ok(h.S.attack.sent.inf <= 9);
+  get('#attackRows').handlers.change({ target: { dataset: { amount: 'inf' }, value: '-3' } });
+  assert.equal(h.S.attack.sent.inf, 0);
+});
+test('guard and assault affect actual attack and defense and lock after departing', () => {
+  const { h } = fixture(), baseAttack = h.atkMult('taipei', 'taipei'), baseDefense = h.defMult('taipei', 'taipei');
+  assert.ok(h.setPosture('taipei', 'guard'));
+  assert.equal(h.atkMult('taipei', 'taipei'), baseAttack * 0.85);
+  assert.equal(h.defMult('taipei', 'taipei'), baseDefense * 1.25);
+  assert.ok(h.setPosture('taipei', 'assault'));
+  assert.equal(h.defMult('taipei', 'taipei'), baseDefense * 0.85);
+  h.S.acted.add('taipei'); assert.equal(h.setPosture('taipei', 'guard'), false);
+  assert.equal(h.S.posture.taipei, 'assault');
+  h.S.acted.clear(); h.S.current = 'newtaipei'; assert.equal(h.setPosture('taipei', 'guard'), false);
+});
+test('sending too many troops raises the visible border risk', () => {
+  const { h } = fixture(); h.S.diff.playerPeace = 0;
+  h.S.army.taipei = { elite: 25 }; h.S.army.newtaipei = { elite: 25 };
+  const full = h.borderThreat('taipei'), depleted = h.borderThreat('taipei', { inf: 1 });
+  assert.ok(depleted.threats[0].ratio > full.threats[0].ratio);
+  assert.equal(depleted.level, 'high');
+});
+test('hostile AI can invade and capture an under-defended player county', async () => {
+  const f = fixture(), { h, context } = f;
+  for (const id of Object.keys(h.S.owner)) {
+    h.S.owner[id] = id === 'taipei' ? 'taipei' : 'newtaipei';
+    h.S.army[id] = {};
+  }
+  h.S.army.newtaipei = { elite: 25 }; h.S.army.taipei = { inf: 1 };
+  h.S.diff = vm.runInContext('DIFFICULTY.hard', context);
+  h.S.current = 'newtaipei'; h.S.acted.clear(); h.S.money.newtaipei = 0;
+  const turn = h.aiTurn('newtaipei', h.S.gen);
+  await f.flush(); await turn;
+  assert.equal(h.S.owner.taipei, 'newtaipei'); assert.equal(h.S.over, true);
+});
+test('postures survive saving while old checkpoint postures default to balanced', () => {
+  const { h } = fixture(); h.S.posture.taipei = 'guard';
+  const saved = JSON.parse(GameSaves.encode(h.S));
+  assert.equal(GameSaves.decode(JSON.stringify(saved), h.saveRules).data.posture.taipei, 'guard');
+  delete saved.data.posture;
+  assert.equal(GameSaves.decode(JSON.stringify(saved), h.saveRules).data.posture.taipei, 'balanced');
+  saved.data.posture = Object.fromEntries(Object.keys(h.S.owner).map(id => [id, 'balanced']));
+  saved.data.posture.taipei = 'invincible';
+  assert.throws(() => GameSaves.decode(JSON.stringify(saved), h.saveRules));
 });
