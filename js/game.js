@@ -121,6 +121,13 @@
       S.research[c.id] = { atk: 0, def: 0, eco: 0 };
       S.aggr[c.id] = rand(1.15, 1.7);
     });
+    // 困難：玩家開局不足 8 人就用阿兵哥補到 8，避免離島第一天被收割
+    if (mode === 'play' && S.army[player] && DIFFICULTY[S.diffKey]?.playerPeace === 0) {
+      const have = count(S.army[player]);
+      if (have < 8) addUnits(S.army[player], 'inf', 8 - have);
+    }
+    // 觀戰沒有玩家；對戰要等玩家第一次行動，之前 AI 不能打玩家
+    S.playerStarted = mode !== 'play';
     S.order = shuffle(COUNTIES.map(c => c.id));
     // 每個縣市兩個技能欄：[固有技能, 自訂技能]；AI 縣市開局就挑好，玩家的老家等玩家自己設定
     S.library = new Set(Object.keys(COMMON_SKILLS)); // 舊存檔格式相容用，自訂技能固定 10 種
@@ -142,6 +149,7 @@
       ? `📣 ${fTag(player)} 宣布出征！目標：統一全台 22 縣市。（難度：${S.diff.name}）`
       : '📣 22 縣市大亂鬥開始！誰會是最後的贏家？', 'big');
     if (S.diff.aiPeace) log(`🕊️ 前 ${S.diff.aiPeace} 天為和平期：AI 縣市不會主動開戰，趁機招兵、併吞鄰居吧！`, 'event');
+    if (mode === 'play') log('🛡️ 開局保護：在你第一次行動前，AI 不會進攻你的縣市', 'event');
     hideModal();
     if (mode === 'play') focusCounty(player); else map.view.set(MAP_W / 2, MAP_H / 2, 1);
     render();
@@ -171,6 +179,7 @@
         // 替代役：兵力太少的縣市每天自動補 1 名阿兵哥
         owned(f).forEach(id => { if (count(S.army[id]) < 2) addCapped(id, 'inf', 1); });
         if (f === S.player && S.mode === 'play') {
+          S.playerStarted = true;
           resetTurnActions();
           log(`🌅 第 ${S.day} 天，輪到你了！稅收 +${fmtMoney(inc)}`, 'me');
           // 自動選取老家（或任一己方縣市），招兵按鈕一開始就看得到
@@ -549,9 +558,8 @@
       for (const src of owned(f)) {
         if (S.acted.has(src) || stunned(src) || count(S.army[src]) < 3 || count(freshArmy(src)) <= 1) continue;
         for (const tgt of enemiesOf(src)) {
-          const vsPlayer = S.owner[tgt] === S.player;
-          if (S.day <= (vsPlayer ? S.diff.playerPeace : S.diff.aiPeace)) continue;
-          if (!vsPlayer && Math.random() > S.diff.aiVsAi) continue;
+          if (!aiMayTarget(tgt)) continue;
+          if (S.owner[tgt] !== S.player && Math.random() > S.diff.aiVsAi) continue;
           const dp = power(S.army[tgt], defMult(S.owner[tgt], tgt));
           let ratio = dp ? power(S.army[src], atkMult(f, src)) / dp : 99;
           if (owned(S.owner[tgt]).length === 1) ratio *= 1.1; // 喜歡收割
@@ -665,14 +673,16 @@
     const pool = front ? keys : keys.filter(k => !HOSTILE.includes(COMMON_SKILLS[k].type) && COMMON_SKILLS[k].type !== 'again');
     return pick(pool);
   }
+  // 和平期，以及玩家還沒行動的開局，AI 不能把該縣市當目標
+  function aiMayTarget(id) {
+    const vsPlayer = S.owner[id] === S.player;
+    if (vsPlayer && !S.playerStarted) return false;
+    return S.day > (vsPlayer ? S.diff.playerPeace : S.diff.aiPeace);
+  }
   // 和平期內不能對受保護的對象使用攻擊型技能
   function hostileTargets(id) {
     const f = S.owner[id];
-    return enemiesOf(id).filter(e => {
-      const vsPlayer = S.owner[e] === S.player;
-      if (f !== S.player && S.day <= (vsPlayer ? S.diff.playerPeace : S.diff.aiPeace)) return false;
-      return true;
-    });
+    return enemiesOf(id).filter(e => f === S.player || aiMayTarget(e));
   }
   // 回傳不能發動的原因；可以發動回傳 null
   function skillBlock(id, i) {
@@ -736,20 +746,34 @@
   });
   $('#spCancel').addEventListener('click', () => { $('#skillPicker').hidden = true; S.picker = null; });
 
+  const AI_SKILLS_PER_TURN = 2;
+  // 老家優先，其次邊境；攻擊、徵兵比純賺錢、純防禦有用
+  const AI_SKILL_WEIGHT = { strike: 4, storm: 4, stun: 3, recruit: 3, atk: 2, money: 1, def: 1 };
   function aiUseSkills(f) {
+    const fullPeace = S.day <= S.diff.aiPeace && S.day <= S.diff.playerPeace;
+    const picks = [];
     for (const id of owned(f)) {
       if (!slotsOf(id)[1]) claimSlots(id); // 讀舊存檔時 AI 縣市可能還沒挑
+      const front = isFront(id);
+      const enemies = enemiesOf(id);
+      const threat = enemies.length ? Math.max(...enemies.map(e => power(S.army[e]))) : 0;
       slotsOf(id).forEach((key, i) => {
         const sk = ALL_SKILLS[key];
-        if (sk.type === 'again' || skillBlock(id, i)) return;
-        const front = isFront(id);
-        const threat = front ? Math.max(...enemiesOf(id).map(e => power(S.army[e]))) : 0;
+        if (!sk || sk.type === 'again' || skillBlock(id, i)) return;
+        if (sk.type === 'def' && fullPeace) return;
         const use = sk.type === 'money' || sk.type === 'recruit'
           || (sk.type === 'atk' && front)
           || (sk.type === 'def' && threat > power(S.army[id]) * 0.8)
           || HOSTILE.includes(sk.type);
-        if (use) useSkill(id, i);
+        if (!use) return;
+        picks.push({ id, i, score: (AI_SKILL_WEIGHT[sk.type] || 0) + (id === f ? 3 : 0) + (front ? 2 : 0) });
       });
+    }
+    picks.sort((a, b) => b.score - a.score || a.i - b.i);
+    let used = 0;
+    for (const p of picks) {
+      if (used >= AI_SKILLS_PER_TURN) break;
+      if (useSkill(p.id, p.i)) used++;
     }
   }
 

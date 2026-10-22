@@ -48,7 +48,7 @@ function fixture() {
   vm.runInContext(source, context);
   const h = context.harness;
   h.initState('play', 'taipei');
-  Object.assign(h.S, { current: 'taipei', diff: vm.runInContext('DIFFICULTY.easy', context), diffKey: 'easy', menuOpen: false });
+  Object.assign(h.S, { current: 'taipei', diff: vm.runInContext('DIFFICULTY.easy', context), diffKey: 'easy', menuOpen: false, playerStarted: true });
   h.S.order = ['taipei', ...h.S.order.filter(x => x !== 'taipei')];
   return { h, context, elements, storage, get, timers, async flush() { for (let i = 0; i < 100; i++) { if (timers.length) timers.shift()(); await Promise.resolve(); } } };
 }
@@ -868,4 +868,132 @@ test('moved troops reset on the next turn and round-trip through old and new sav
   assert.equal(h.S.current, 'taipei');
   assert.equal(h.S.day, 2);
   assert.deepEqual({ ...h.S.moved }, {});
+});
+
+test('old saves treat the player as already started; an explicit flag round-trips', () => {
+  const { h } = fixture();
+  h.S.playerStarted = false;
+  const saved = JSON.parse(GameSaves.encode(h.S));
+  assert.equal(GameSaves.decode(JSON.stringify(saved), h.saveRules).data.playerStarted, false);
+  delete saved.data.playerStarted;
+  assert.equal(GameSaves.decode(JSON.stringify(saved), h.saveRules).data.playerStarted, true);
+});
+
+test('hard difficulty tops an island opening army up to 8 and announces protection', () => {
+  const f = fixture(), { h, get } = f;
+  h.S.diffKey = 'easy';
+  h.initState('play', 'penghu');
+  assert.equal(Combat.count(h.S.army.penghu), 4, 'easy keeps the island army');
+  h.S.diffKey = 'hard';
+  h.newGame('play', 'penghu');
+  assert.ok(Combat.count(h.S.army.penghu) >= 8);
+  assert.equal(h.S.army.penghu.art, 1, 'top-up adds infantry and keeps the artillery');
+  assert.ok(get('#log').children.some(c => c.innerHTML.includes('開局保護')));
+  ++h.S.gen;
+});
+
+test('before the player acts, a hard AI cannot capture or strike their county', async () => {
+  const f = fixture(), { h, context } = f;
+  h.S.speed = 99;
+  h.S.diff = vm.runInContext('DIFFICULTY.hard', context);
+  h.S.player = 'penghu';
+  h.S.playerStarted = false;
+  h.S.owner.penghu = 'penghu';
+  h.S.owner.changhua = h.S.owner.chiayicounty = 'yunlin';
+  h.S.army.penghu = { inf: 1 };
+  h.S.army.yunlin = { elite: 25 };
+  h.S.money.yunlin = 0;
+  h.S.slots.yunlin = ['yunlin', 'c_leak'];
+  h.S.skillReady = {};
+  h.S.current = 'yunlin';
+  h.S.acted.clear();
+  const blocked = h.aiTurn('yunlin', h.S.gen);
+  await f.flush();
+  await blocked;
+  assert.equal(h.S.owner.penghu, 'penghu');
+  assert.equal(h.S.army.penghu.inf, 1, 'strike skills also spare the player');
+  h.S.playerStarted = true;
+  h.S.acted.clear();
+  h.S.money.yunlin = 0;
+  h.S.skillReady = {};
+  const open = h.aiTurn('yunlin', h.S.gen);
+  await f.flush();
+  await open;
+  assert.equal(h.S.owner.penghu, 'yunlin');
+});
+
+test('a hard penghu opening survives every AI turn before the player acts', async () => {
+  const f = fixture(), { h, context } = f;
+  const hard = vm.runInContext('DIFFICULTY.hard', context);
+  for (let n = 0; n < 20; n++) {
+    ++h.S.gen;
+    h.S.diffKey = 'hard';
+    h.S.speed = 99;
+    h.initState('play', 'penghu');
+    h.S.diff = hard;
+    h.S.gameDiffKey = 'hard';
+    h.S.menuOpen = false;
+    assert.equal(h.S.playerStarted, false);
+    assert.ok(Combat.count(h.S.army.penghu) >= 8);
+    const troops = Combat.count(h.S.army.penghu);
+    for (const id of h.S.order) {
+      if (id === 'penghu') break;
+      if (!Object.values(h.S.owner).includes(id)) continue;
+      const turn = h.aiTurn(id, h.S.gen);
+      await f.flush();
+      await turn;
+    }
+    assert.equal(h.S.owner.penghu, 'penghu', `iteration ${n}`);
+    assert.equal(Combat.count(h.S.army.penghu), troops, `iteration ${n} army was hit before the first turn`);
+    h.S.turnIdx = h.S.order.indexOf('penghu');
+    await h.runLoop(h.S.gen);
+    assert.equal(h.S.current, 'penghu');
+    assert.equal(h.S.playerStarted, true);
+    assert.ok(Object.values(h.S.owner).includes('penghu'));
+  }
+});
+
+test('an AI faction uses at most two skills per turn and skips defense during peace', () => {
+  const f = fixture(), { h, context } = f;
+  h.S.diff = vm.runInContext('DIFFICULTY.hard', context);
+  h.S.day = 3;
+  h.S.playerStarted = true;
+  h.S.skillReady = {};
+  for (const id of Object.keys(h.S.owner)) {
+    h.S.owner[id] = 'kaohsiung';
+    h.S.slots[id] = [id, 'c_build'];
+    h.S.army[id] = { inf: 4 };
+    h.S.money.kaohsiung = 0;
+  }
+  h.aiUseSkills('kaohsiung');
+  const used = Object.keys(h.S.skillReady);
+  assert.ok(used.length > 0 && used.length <= 2, `used ${used.length}: ${used.join(',')}`);
+  assert.ok(used.every(k => k.startsWith('kaohsiung:')), 'home county skills come first');
+
+  h.S.diff = vm.runInContext('DIFFICULTY.easy', context);
+  h.S.day = 1;
+  h.S.skillReady = {};
+  h.S.buff = {};
+  for (const id of Object.keys(h.S.owner)) {
+    h.S.owner[id] = 'newtaipei';
+    h.S.slots[id] = [id, 'c_guard'];
+    h.S.skillReady[`${id}:0`] = 99;
+    h.S.skillReady[`${id}:1`] = 99;
+    h.S.army[id] = { inf: 1 };
+  }
+  h.S.owner.taichung = 'taichung';
+  h.S.army.taichung = { elite: 25 };
+  for (const id of ['miaoli', 'hsinchucounty']) {
+    delete h.S.skillReady[`${id}:0`];
+    delete h.S.skillReady[`${id}:1`];
+  }
+  h.aiUseSkills('newtaipei');
+  assert.equal(h.S.buff.miaoli, undefined);
+  assert.equal(h.S.skillReady['miaoli:0'], undefined);
+  assert.equal(h.S.skillReady['miaoli:1'], undefined);
+
+  h.S.diff = vm.runInContext('DIFFICULTY.hard', context);
+  h.S.buff = {};
+  h.aiUseSkills('newtaipei');
+  assert.ok(h.S.buff.miaoli?.def, 'defense is allowed once peace is over');
 });
