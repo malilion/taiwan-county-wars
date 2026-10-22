@@ -44,7 +44,7 @@ function fixture() {
   }`, context);
   let source = fs.readFileSync('js/game.js', 'utf8');
   const at = source.lastIndexOf('})();');
-  source = source.slice(0, at) + `Object.assign(harness, { S, initState, runLoop, endPlayerTurn, doAttack, saveCheckpoint, loadCheckpoint, saveRules, render, buildFacility, produceBuildings, income, defMult, openAttack, showStart, newGame, recruit, confirmTransfer, checkEnd, startInvasion, doExpedition, invasionRaid, expeditionAllowed, borderThreat, setPosture, atkMult, aiTurn, BV });` + source.slice(at);
+  source = source.slice(0, at) + `Object.assign(harness, { S, initState, runLoop, endPlayerTurn, doAttack, saveCheckpoint, loadCheckpoint, saveRules, render, buildFacility, produceBuildings, income, defMult, openAttack, showStart, newGame, recruit, confirmTransfer, checkEnd, startInvasion, doExpedition, invasionRaid, expeditionAllowed, borderThreat, setPosture, atkMult, aiTurn, BV, startAim, aimAt, pickedArmy, nextTurn });` + source.slice(at);
   vm.runInContext(source, context);
   const h = context.harness;
   h.initState('play', 'taipei');
@@ -484,4 +484,53 @@ test('replacing the game mid-playback leaves the new game untouched', async () =
   const before = JSON.stringify({ owner: h.S.owner, army: h.S.army });
   await f.flush(); await old;
   assert.equal(JSON.stringify({ owner: h.S.owner, army: h.S.army }), before);
+});
+
+test('box-selected soldiers aim a red arrow at an enemy and prefill the attack, keeping one at home', () => {
+  const { h, get } = fixture();
+  h.S.army.taipei = { inf: 3, art: 2 };
+  assert.deepEqual({ ...h.pickedArmy('taipei', [3, 4]) }, { art: 2 }, 'cells follow the map card order');
+  assert.ok(h.startAim('taipei', [0, 1, 2, 3, 4]));
+  h.aimAt('newtaipei');
+  assert.equal(h.S.aim, null); assert.equal(get('#attackDialog').hidden, false);
+  assert.deepEqual({ ...h.S.attack.sent }, { inf: 2, art: 2 });
+  assert.deepEqual({ ...h.S.army.taipei }, { inf: 3, art: 2 }, 'nothing leaves before confirming');
+  assert.equal(h.S.acted.size, 0);
+});
+test('a blue arrow to a connected own county moves only the picked soldiers that fit', () => {
+  const { h } = fixture();
+  h.S.owner.newtaipei = 'taipei'; h.S.army.newtaipei = { inf: 24 }; h.S.army.taipei = { inf: 4, moto: 2 };
+  h.S.acted.add('taipei'); // moving troops is still allowed after attacking
+  assert.ok(h.startAim('taipei', [4, 5]));
+  h.aimAt('newtaipei');
+  assert.equal(Combat.count(h.S.army.newtaipei), 25);
+  assert.equal(Combat.count(h.S.army.taipei), 5);
+  assert.equal(h.S.army.newtaipei.moto, 1);
+});
+test('invalid arrow targets keep aiming; attacks need an unused, adjacent source', () => {
+  const { h, get } = fixture();
+  h.S.army.taipei = { inf: 5 };
+  h.startAim('taipei', [0, 1]);
+  h.aimAt('pingtung');
+  assert.ok(h.S.aim, 'still aiming after a far target'); assert.equal(get('#attackDialog').hidden, true);
+  h.S.acted.add('taipei');
+  h.aimAt('newtaipei');
+  assert.ok(h.S.aim); assert.equal(get('#attackDialog').hidden, true);
+  assert.equal(h.startAim('newtaipei', [0]), false, 'enemy soldiers cannot be picked');
+});
+test('the day ends with a news broadcast of captures and eliminations', async () => {
+  const f = fixture(), { h, get } = f;
+  h.S.speed = 99; h.S.army.newtaipei = {}; h.S.army.taipei = { inf: 5 };
+  const attack = h.doAttack('taipei', 'newtaipei', h.S.gen, false, { inf: 3 });
+  await f.flush(); await attack;
+  assert.deepEqual([...h.S.news.map(n => n.kind)], ['capture', 'elim']);
+  h.S.speed = 1; h.S.turnIdx = h.S.order.length - 1;
+  const day = h.S.day, done = h.nextTurn(h.S.gen);
+  await Promise.resolve();
+  assert.equal(get('#newsFlash').hidden, false);
+  assert.match(get('#newsBody').innerHTML, /新北市<\/b> 滅亡了/);
+  await f.flush(); await done;
+  assert.equal(get('#newsFlash').hidden, true);
+  assert.equal(h.S.day, day + 1); assert.equal(h.S.news.length, 0);
+  assert.ok(get('#log').children.some(c => c.innerHTML.includes('晚間新聞')));
 });
