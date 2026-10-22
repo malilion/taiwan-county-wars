@@ -355,6 +355,7 @@ button:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
 #map.zoomed .cards { display: inline; }
 #map.zoomed .labels { display: none; }
 .ccard { cursor: pointer; }
+.ccard .chit { fill: transparent; }
 .ccard .ctag { stroke: #0b1426; stroke-width: .5; }
 .ccard .cname { text-anchor: middle; font-size: 4.6px; font-weight: 900; fill: #fff; paint-order: stroke; stroke: rgba(0, 0, 0, .55); stroke-width: .6px; pointer-events: none; }
 .ccard .cgrid { fill: #0e1a33; stroke: #e8eef9; stroke-width: .45; }
@@ -539,3 +540,39 @@ button:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
 @media (prefers-reduced-motion: reduce) {
   .battleScreen *, .battleScreen *::after { animation-duration: 1ms !important; animation-delay: 0s !important; }
 }
+
+/* ───────── 框選士兵＋箭頭指揮 ───────── */
+.hl-b { color: #3a86ff; }
+.boxHint { border-left: 3px solid var(--accent); padding-left: 8px; }
+.ccard.mine { cursor: crosshair; }
+.ccard .ccell.picked { fill: #ffd166; stroke: #fff; stroke-width: .5; }
+.pickBox { fill: rgba(255, 209, 102, .18); stroke: #ffd166; stroke-width: calc(1.5px / var(--z, 1)); stroke-dasharray: 3 2; pointer-events: none; }
+.aimArrow { fill: none; stroke-width: calc(6px / var(--z, 1)); stroke-linecap: round; stroke-dasharray: 10 6; animation: dash .5s linear infinite; filter: drop-shadow(0 0 4px #000); pointer-events: none; }
+.aimLabel { font-size: calc(15px / var(--z, 1)); font-weight: 900; text-anchor: middle; paint-order: stroke; stroke: #000; stroke-width: calc(4px / var(--z, 1)); pointer-events: none; }
+
+/* ───────── 每日新聞 ───────── */
+.newsFlash {
+  position: fixed; top: 72px; left: 50%; transform: translateX(-50%); z-index: 8;
+  width: min(520px, calc(100% - 32px)); background: #f4f1de; color: #111; border-radius: 10px;
+  border: 3px solid #d00000; box-shadow: 0 12px 32px rgba(0, 0, 0, .5); overflow: hidden; cursor: pointer;
+  animation: news-in .35s ease-out both;
+}
+.newsFlash[hidden] { display: none; }
+.newsHead { display: flex; align-items: center; gap: 10px; background: #d00000; color: #fff; padding: 6px 12px; }
+.newsLive { background: #fff; color: #d00000; font-weight: 900; font-size: 12px; border-radius: 4px; padding: 1px 6px; animation: news-blink 1s steps(2) infinite; }
+.newsHead b { flex: 1; font-size: 18px; }
+.newsStation { font-size: 12px; opacity: .85; }
+#newsBody { padding: 10px 14px 0; }
+.newsElim { font-size: clamp(20px, 5vw, 28px); font-weight: 900; padding: 6px 0; border-bottom: 1px dashed #c9c2a5; }
+.newsElim b { -webkit-text-stroke: .6px #111; paint-order: stroke; }
+.newsElim small { display: block; font-size: 14px; font-weight: 400; color: #444; }
+.newsCaps { list-style: none; margin: 8px 0 0; padding: 0; display: grid; gap: 4px; font-size: 15px; }
+.newsCaps li { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.newsCaps .sw { width: 10px; height: 10px; border-radius: 2px; }
+.newsCaps small { color: #555; }
+.newsCaps em { font-style: normal; font-size: 12px; font-weight: 700; background: #06d6a0; color: #111; border-radius: 4px; padding: 0 5px; }
+.newsCaps em.bad { background: #ef476f; color: #fff; }
+.newsCaps .more { color: #555; }
+#newsFoot { margin: 8px 0 0; padding: 6px 14px; background: #111; color: #ffd166; font-size: 13px; }
+@keyframes news-in { from { opacity: 0; transform: translate(-50%, -16px); } }
+@keyframes news-blink { 50% { opacity: .35; } }
