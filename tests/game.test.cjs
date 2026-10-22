@@ -37,10 +37,10 @@ function fixture() {
   }
   const knownIds = new Set([...fs.readFileSync('index.html', 'utf8').matchAll(/id="([^"]+)"/g)].map(m => '#' + m[1]));
   const elements = new Map(), get = id => { if (!knownIds.has(id)) throw Error('Missing DOM element: ' + id); if (!elements.has(id)) elements.set(id, new Element()); return elements.get(id); };
-  const timers = [], storage = new Map();
+  const timers = [], storage = new Map(), listeners = {};
   const context = vm.createContext({
     console, harness: {}, confirm: () => true,
-    document: { querySelector: get, querySelectorAll: () => [], addEventListener() {}, createElement: () => new Element() },
+    document: { querySelector: get, querySelectorAll: () => [], addEventListener(type, fn) { (listeners[type] ||= []).push(fn); }, createElement: () => new Element() },
     window: { addEventListener() {} }, localStorage: { getItem: k => storage.get(k) || null, setItem: (k, v) => storage.set(k, v) },
     setTimeout: fn => { timers.push(fn); return timers.length; }, clearTimeout() {},
     MAP_W: 640, MAP_H: 830, svgEl: () => new Element(), buildMinimap() {},
@@ -63,11 +63,11 @@ function fixture() {
   h.initState('play', 'taipei');
   Object.assign(h.S, { current: 'taipei', diff: vm.runInContext('DIFFICULTY.easy', context), diffKey: 'easy', menuOpen: false, playerStarted: true });
   h.S.order = ['taipei', ...h.S.order.filter(x => x !== 'taipei')];
-  return { h, context, elements, storage, get, timers, async flush() { for (let i = 0; i < 100; i++) { if (timers.length) timers.shift()(); await Promise.resolve(); } } };
+  return { h, context, elements, storage, get, timers, listeners, async flush() { for (let i = 0; i < 100; i++) { if (timers.length) timers.shift()(); await Promise.resolve(); } } };
 }
 const dataContext = vm.createContext({});
-vm.runInContext(fs.readFileSync('js/data.js', 'utf8') + '\nthis.data = { UNITS, COUNTERS };', dataContext);
-const { UNITS: units, COUNTERS: counters } = dataContext.data;
+vm.runInContext(fs.readFileSync('js/data.js', 'utf8') + '\nthis.data = { UNITS, COUNTERS, TACTICS };', dataContext);
+const { UNITS: units, COUNTERS: counters, TACTICS } = dataContext.data;
 const options = (sent, defenders) => ({ sent, defenders, units, counters, attackMult: 1, defenseMult: 1, defenderAttack: 1 });
 
 test('deployment preserves a home defender for full, half and singleton armies', () => {
@@ -441,14 +441,15 @@ async function untilStep(f, step) {
 test('battles run until one side is wiped out and retreat keeps the current survivors', () => {
   for (const [a, d] of [[{ inf: 12, moto: 3 }, { gen: 14 }], [{ elite: 3 }, { inf: 25 }], [{ inf: 2 }, { gen: 20 }]]) {
     const r = Combat.resolve(options(a, d));
-    assert.ok(Combat.count(r.A) === 0 || Combat.count(r.D) === 0, 'no round limit: someone is annihilated');
+    assert.ok(Combat.count(r.A) === 0 || Combat.count(r.D) === 0, 'short matchups still end in a wipe');
+    assert.equal(r.timeout, false);
     assert.deepEqual(r.rounds.at(-1).A, r.A);
   }
   const o = options({ inf: 12, moto: 3 }, { gen: 14 }), st = Combat.setup(o);
   assert.equal(Combat.finish(st, true).lostA, 0);
   Combat.step(st, o, () => 0.5);
   const mid = Combat.finish(st, true);
-  assert.ok(mid.retreated); assert.equal(mid.win, false);
+  assert.ok(mid.retreated); assert.equal(mid.win, false); assert.equal(mid.timeout, false);
   assert.equal(Combat.count(mid.A) + mid.lostA, 15); assert.equal(Combat.count(mid.D) + mid.lostD, 14);
 });
 test('each unit type fights in its own row; attackers line up against what they counter', () => {
@@ -479,6 +480,47 @@ test('player battles open the battle screen and close it after the result', asyn
   await f.flush(); await battle;
   assert.equal(get('#battleScreen').hidden, true); assert.equal(h.BV.open, false);
 });
+test('the hourglass counts down, then a stalled defence sends the attacker home', async () => {
+  const f = fixture(), { h, get } = f;
+  h.S.units.inf = { ...h.S.units.inf, atk: 0, hp: 1e9 };
+  h.S.army.taipei = { inf: 8 }; h.S.army.newtaipei = { inf: 8 };
+  const battle = h.doAttack('taipei', 'newtaipei', h.S.gen, false, { inf: 6 });
+  await untilStep(f, 0);
+  assert.match(get('#bsTimer').innerHTML, /⏳ 剩 <b>12<\/b> 合/);
+  assert.equal(get('#bsTimer').className, 'bsTimer');
+  await untilStep(f, 9);
+  assert.match(get('#bsTimer').innerHTML, /⏳ 剩 <b>3<\/b> 合/);
+  assert.equal(get('#bsTimer').className, 'bsTimer low');
+  await f.flush(); await battle;
+  const r = h.S.lastBattle;
+  assert.equal(r.timeout, true); assert.equal(r.win, false); assert.equal(r.retreated, false);
+  assert.equal(r.rounds.length - 1, Combat.TIME_LIMIT);
+  assert.ok(Combat.count(r.A) > 0);
+  assert.equal(h.S.owner.newtaipei, 'newtaipei');
+  assert.equal(h.S.army.taipei.inf, 8);
+  assert.equal(h.S.army.newtaipei.inf, 8);
+  assert.match(get('#bsStamp').innerHTML, /時間到・守住！/);
+  assert.match(get('#bsStamp').className, /\bhold\b/);
+  assert.ok(get('#log').children.some(c => c.innerHTML.includes('時間到') && c.innerHTML.includes('守住了')));
+});
+test('a watched AI defender spends one tactic once its numbers fall below half', async () => {
+  const f = fixture(), { h } = f;
+  vm.runInContext('Math.random = () => 0.5', f.context);
+  h.S.units.inf = { ...h.S.units.inf, atk: 20, hp: 10 };
+  h.S.research.newtaipei.def = 0;
+  h.S.army.taipei = { inf: 11 }; h.S.army.newtaipei = { inf: 10 };
+  const battle = h.doAttack('taipei', 'newtaipei', h.S.gen, false, { inf: 10 });
+  await untilStep(f, 1);
+  assert.equal(h.BV.st.tacticUsed.D, undefined);
+  assert.ok(Combat.count(h.BV.st.D) * 2 < h.BV.st.d0);
+  await untilStep(f, 2);
+  assert.equal(h.BV.st.tacticUsed.D, 'fire');
+  assert.match(f.get('#bsFloat').textContent, /鞭炮突擊！/);
+  h.S.research.newtaipei.def = 1;
+  await f.flush(); await battle;
+  assert.equal(h.BV.st.tacticUsed.D, 'fire', 'the defender does not get a second tactic');
+  assert.equal(h.S.owner.newtaipei, 'newtaipei');
+});
 test('strategic retreat keeps that clash\'s survivors, spares the target and uses the action', async () => {
   const f = fixture(), { h, get } = f;
   h.S.army.taipei = { inf: 21 }; h.S.army.newtaipei = { gen: 20 };
@@ -500,6 +542,38 @@ test('defending players watch without a retreat button; lightning speed and AI-o
   const defend = h.doAttack('newtaipei', 'taipei', h.S.gen, false, { inf: 4 });
   await untilStep(f, 0);
   assert.equal(get('#bsRetreat').hidden, true);
+  assert.equal(get('#bsTacticWrap').hidden, false);
+  const press = key => f.listeners.keydown.at(-1)({ key, preventDefault() {}, target: { tagName: 'DIV' } });
+  press('t');
+  assert.equal(get('#bsTacticMenu').hidden, false, 't opens the tactic menu');
+  press('t');
+  assert.equal(get('#bsTacticMenu').hidden, true, 't closes the tactic menu');
+  press('T');
+  get('#bsTacticBtn').handlers.click();
+  assert.equal(get('#bsTacticMenu').hidden, true, 'the button toggles the menu closed');
+  get('#bsTacticBtn').handlers.click();
+  const locked = get('#bsTacticMenu').innerHTML;
+  assert.equal(get('#bsTacticMenu').hidden, false);
+  assert.equal(/<button data-tactic="fire"[^>]*>/.exec(locked)[0].includes('disabled'), false);
+  assert.match(/<button data-tactic="wall"[^>]*>/.exec(locked)[0], /disabled/);
+  assert.match(locked, /城防工事 Lv\.1/);
+  assert.match(/<button data-tactic="heal"[^>]*>/.exec(locked)[0], /disabled/);
+  assert.match(locked, /經濟發展 Lv\.1 或城防工事 Lv\.2/);
+  assert.match(/<button data-tactic="smoke"[^>]*>/.exec(locked)[0], /disabled/);
+  assert.match(locked, /軍事訓練 Lv\.2/);
+  h.S.research.taipei = { atk: 2, def: 2, eco: 0 };
+  get('#bsTacticBtn').handlers.click();
+  get('#bsTacticBtn').handlers.click();
+  const open = get('#bsTacticMenu').innerHTML;
+  for (const key of ['fire', 'wall', 'heal', 'smoke']) assert.equal(new RegExp(`<button data-tactic="${key}"[^>]*>`).exec(open)[0].includes('disabled'), false, key);
+  get('#bsTacticMenu').handlers.click({ target: { closest: sel => sel === 'button[data-tactic]' ? { dataset: { tactic: 'fire' }, disabled: false } : null } });
+  assert.equal(h.BV.st.tacticUsed.D, 'fire');
+  assert.equal(get('#bsTacticBtn').disabled, true);
+  assert.match(get('#bsTacticBtn').textContent, /鞭炮突擊/);
+  assert.match(get('#bsFloat').textContent, /🧨 鞭炮突擊！/);
+  assert.equal(get('#bsTacticMenu').hidden, true);
+  get('#bsTacticBtn').handlers.click();
+  assert.equal(get('#bsTacticMenu').hidden, true, 'a used tactic cannot be opened again');
   await f.flush(); await defend;
   h.BV.step = 0; h.S.army.yilan = { inf: 6 }; h.S.army.hualien = { inf: 2 }; h.S.current = 'yilan';
   const aiOnly = h.doAttack('yilan', 'hualien', h.S.gen, false, { inf: 5 });
@@ -677,7 +751,7 @@ test('the player moves their own rows with the bottom buttons during a battle', 
   assert.equal(h.BV.st.laneD.join(), 'gen,art', 'cannot touch enemy rows');
   await f.flush(); await battle;
   const r = h.S.lastBattle;
-  assert.ok(Combat.count(r.A) === 0 || Combat.count(r.D) === 0);
+  assert.ok(r.timeout || Combat.count(r.A) === 0 || Combat.count(r.D) === 0);
 });
 
 test('the AI side re-arranges after each round to counter the current line-up', () => {
@@ -689,6 +763,91 @@ test('the AI side re-arranges after each round to counter the current line-up', 
   const fixed = { ...o, adapt: '' }, still = Combat.setup(fixed);
   Combat.step(still, fixed, () => 0.5);
   assert.equal(still.laneD.join(), 'gen,art', 'adapt can be turned off');
+});
+test('the hourglass ends a battle that cannot be finished', () => {
+  assert.equal(Combat.TIME_LIMIT, 12);
+  const tank = { name: '石敢當', icon: '🪨', cost: 1, atk: 1, hp: 1e9, cls: 'inf' };
+  const o = { sent: { inf: 4 }, defenders: { inf: 4 }, units: { inf: tank }, counters: {}, attackMult: 1, defenseMult: 1, defenderAttack: 1 };
+  const r = Combat.resolve(o, () => 0.5);
+  assert.equal(r.rounds.length - 1, Combat.TIME_LIMIT);
+  assert.equal(r.win, false);
+  assert.equal(r.timeout, true);
+  assert.equal(r.retreated, false);
+  assert.ok(Combat.count(r.A) > 0);
+  assert.ok(Combat.count(r.D) > 0);
+  const quick = Combat.resolve(options({ inf: 30 }, { inf: 1 }), () => 0.5);
+  assert.equal(quick.win, true);
+  assert.equal(quick.timeout, false);
+  assert.equal(Combat.estimate(o, 12).chance, 0);
+});
+test('each side can use one tactic per battle', () => {
+  const tough = { inf: { ...units.inf, hp: 1e9 } };
+  const o = { ...options({ inf: 8 }, { inf: 8 }), units: tough };
+  const plain = Combat.setup(o), fired = Combat.setup(o), walled = Combat.setup(o);
+  assert.equal(Combat.useTactic(fired, 'A', 'fire'), true);
+  assert.equal(Combat.useTactic(fired, 'A', 'wall'), false);
+  assert.equal(Combat.useTactic(fired, 'A', 'fire'), false);
+  assert.equal(fired.tacticUsed.A, 'fire');
+  assert.equal(Combat.useTactic(fired, 'D', 'smoke'), true);
+  assert.equal(Combat.useTactic(fired, 'D', 'heal'), false);
+  const fresh = Combat.setup(o);
+  assert.equal(Combat.useTactic(fresh, 'A', 'meteor'), false);
+  assert.equal(fresh.tacticUsed.A, undefined);
+  assert.equal(Combat.useTactic(fresh, 'nope', 'fire'), false);
+  const rnd = () => 0.5;
+  const boosted = Combat.setup(o);
+  assert.equal(Combat.useTactic(boosted, 'A', 'fire'), true);
+  for (let n = 1; n <= 4; n++) {
+    Combat.step(plain, o, rnd);
+    Combat.step(boosted, o, rnd);
+    const ratio = boosted.rounds[n].toD.inf / plain.rounds[n].toD.inf;
+    assert.ok(Math.abs(ratio - (n <= 3 ? 1.5 : 1)) < 1e-9, `fire round ${n}`);
+  }
+  const smoked = Combat.setup(o);
+  assert.equal(Combat.useTactic(smoked, 'A', 'smoke'), true);
+  Combat.step(smoked, o, rnd); Combat.step(smoked, o, rnd);
+  assert.equal(smoked.rounds[1].toA.inf, 0, 'smoke stops the enemy for one round');
+  assert.ok(smoked.rounds[1].toD.inf > 0, 'our side still attacks through the smoke');
+  assert.ok(smoked.rounds[2].toA.inf > 0, 'smoke wears off on the following round');
+  Combat.useTactic(walled, 'D', 'wall');
+  const base = Combat.setup(o);
+  Combat.step(base, o, rnd); Combat.step(walled, o, rnd);
+  assert.ok(Math.abs(walled.rounds[1].toD.inf - base.rounds[1].toD.inf * 0.5) < 1e-9);
+  const healed = Combat.setup(options({ inf: 10, moto: 4 }, { gen: 6 }));
+  healed.A.inf = 0; healed.A.moto = 3;
+  assert.equal(Combat.useTactic(healed, 'A', 'heal'), true);
+  assert.equal(healed.A.inf, 3);
+  assert.equal(healed.A.moto, 4);
+  assert.ok(healed.A.inf <= 10 && healed.A.moto <= 4);
+  assert.equal(Combat.useTactic(healed, 'A', 'heal'), false);
+  assert.equal(healed.A.inf, 3);
+  assert.equal(healed.rounds[0].A.inf, 3, 'the battlefield shows the revived count');
+});
+test('tactic unlocks follow research, and the defender AI spends its one tactic below half strength', () => {
+  const none = { atk: 0, def: 0, eco: 0 };
+  assert.equal(TACTICS.fire.need(none), true);
+  assert.equal(TACTICS.wall.need(none), false);
+  assert.equal(TACTICS.wall.need({ ...none, def: 1 }), true);
+  assert.equal(TACTICS.heal.need(none), false);
+  assert.equal(TACTICS.heal.need({ ...none, eco: 1 }), true);
+  assert.equal(TACTICS.heal.need({ ...none, def: 1 }), false);
+  assert.equal(TACTICS.heal.need({ ...none, def: 2 }), true);
+  assert.equal(TACTICS.smoke.need({ ...none, atk: 1 }), false);
+  assert.equal(TACTICS.smoke.need({ ...none, atk: 2 }), true);
+  assert.equal(TACTICS.fire.name, '鞭炮突擊');
+  for (const key of Object.keys(TACTICS)) assert.equal(Combat.useTactic(Combat.setup(options({ inf: 3 }, { inf: 3 })), 'A', key), true, key);
+  const full = Combat.setup(options({ inf: 6 }, { inf: 10 }));
+  assert.equal(Combat.aiTactic(full, { def: 1 }), null);
+  full.D.inf = 5;
+  assert.equal(Combat.aiTactic(full, { def: 1 }), null, 'exactly half is not below half');
+  full.D.inf = 4;
+  assert.equal(Combat.aiTactic(full, { def: 1 }), 'wall');
+  assert.equal(full.buff.D.take, 3);
+  assert.equal(Combat.aiTactic(full, { def: 0 }), null);
+  const bare = Combat.setup(options({ inf: 6 }, { inf: 10 }));
+  bare.D.inf = 4;
+  assert.equal(Combat.aiTactic(bare, { def: 0 }), 'fire');
+  assert.equal(bare.buff.D.deal, 3);
 });
 test('a row can be sent straight at any enemy row, e.g. the last one', () => {
   const o = { ...options({ moto: 5, inf: 5 }, { inf: 6, gen: 3, art: 4 }), adapt: '' };

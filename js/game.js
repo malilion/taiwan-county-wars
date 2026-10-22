@@ -285,7 +285,8 @@
       clearArrows();
       r = await playBattle({ title: `${byId[tgt].short}攻防戰`, emblem: emblemOf(tgt), canRetreat: fa === S.player,
         att: { name: byId[src].short, color: byId[fa].color, mine: fa === S.player },
-        def: { name: byId[tgt].short, color: byId[fd].color, mine: fd === S.player } }, options, gen);
+        def: { name: byId[tgt].short, color: byId[fd].color, mine: fd === S.player },
+        ai: fd === S.player ? null : { side: 'D', research: S.research[fd] } }, options, gen);
       if (gen !== S.gen || S.over) return;
       await finishBattle(r, gen);
       if (gen !== S.gen || S.over) return;
@@ -316,8 +317,9 @@
       clampMoved(src);
       for (const k of kinds(r.A)) addUnits(S.army[src], k, r.A[k]); // 殘兵撤回，今天不能再動
       markMoved(src, r.A);
-      popText(tgt, r.retreated ? '撤退' : '守住！', '#8ecae6');
+      popText(tgt, r.retreated ? '撤退' : r.timeout ? '時間到' : '守住！', '#8ecae6');
       log(r.retreated ? `🏳️ ${fTag(fa)} 從 ${cTag(tgt)} 戰略撤退，殘兵返回 ${cTag(src)}（攻方損 ${r.lostA}、守方損 ${r.lostD}）`
+        : r.timeout ? `⏳ 時間到，${cTag(tgt)} 守住了（攻方損 ${r.lostA}、守方損 ${r.lostD}）`
         : `🛡️ ${cTag(tgt)} 擋下 ${fTag(fa)} 的進攻（攻方損 ${r.lostA}、守方損 ${r.lostD}）`, fd === S.player || fa === S.player ? 'me' : '');
     }
     render();
@@ -432,7 +434,8 @@
       S.money[S.player] += 120;
       S.invasion.shield = Math.min(100, S.invasion.shield + 10);
     }
-    log(`${r.win ? '🏆' : '🛸'} ${cTag(src)} 出征${Invasion.SITES[site].name}：${r.win ? '摧毀成功，補給 +120 萬、防線 +10' : r.retreated ? '戰略撤退，守軍損耗保留' : '未能攻陷，守軍損耗保留'}。我軍折損 ${r.lostA} 人，敵軍折損 ${r.lostD} 人；${count(r.A)} 人返港。`, 'me');
+    const expeditionLine = r.win ? '摧毀成功，補給 +120 萬、防線 +10' : r.retreated ? '戰略撤退，守軍損耗保留' : r.timeout ? '⏳ 時間到，未能攻陷，守軍損耗保留' : '未能攻陷，守軍損耗保留';
+    log(`${r.win ? '🏆' : '🛸'} ${cTag(src)} 出征${Invasion.SITES[site].name}：${expeditionLine}。我軍折損 ${r.lostA} 人，敵軍折損 ${r.lostD} 人；${count(r.A)} 人返港。`, 'me');
     S.lastExpedition = { name: Invasion.SITES[site].name, win: r.win, lostA: r.lostA, lostD: r.lostD };
     S.busy = false;
     S.sel = src;
@@ -469,7 +472,7 @@
     clampMoved(port);
     const damage = r.win ? 18 : 4;
     S.invasion.shield = Math.max(0, S.invasion.shield - damage);
-    log(`🚨 外星空襲${cTag(port)}！${r.win ? '守軍遭突破' : '守軍攔截成功'}，守軍折損 ${r.lostD} 人，全台防線 -${damage}%（剩 ${S.invasion.shield}%）。`, 'big');
+    log(`🚨 外星空襲${cTag(port)}！${r.win ? '守軍遭突破' : r.timeout ? '⏳ 時間到，守軍守住' : '守軍攔截成功'}，守軍折損 ${r.lostD} 人，全台防線 -${damage}%（剩 ${S.invasion.shield}%）。`, 'big');
     if (!S.invasion.shield) {
       S.invasion.status = 'lost';
       S.over = true;
@@ -884,7 +887,9 @@
     const targetName = expedition ? Invasion.SITES[tgt].name : byId[tgt].short;
     const options = expedition ? expeditionOptions(src, tgt, sent) : combatOptions(src, tgt, sent);
     $('#attackTitle').textContent = `${byId[src].short} → ${targetName}`;
-    $('#attackHint').textContent = expedition ? '每港每日出征一次；戰鬥打到一方全滅（可戰略撤退），存活部隊返港，前哨守軍戰損保留。' : '每個縣市每日出兵一次；戰鬥打到一方全滅（可在戰鬥中戰略撤退），攻陷後駐守新領土。';
+    $('#attackHint').textContent = expedition
+      ? `每港每日出征一次；最多 ${Combat.TIME_LIMIT} 合，時間到而守軍仍在則守住（可戰略撤退，也可使用一次戰術），存活部隊返港，前哨守軍戰損保留。`
+      : `每個縣市每日出兵一次；最多 ${Combat.TIME_LIMIT} 合，時間到而守軍仍在則守住（可在戰鬥中戰略撤退，也可使用一次戰術），攻陷後駐守新領土。`;
     $('#attackForces').innerHTML = `<div><small>出征部隊</small><b>${total}<em> 人</em></b><span>本土留守 ${home} 人</span></div>
       <span class="versus">VS</span><div><small>${expedition ? '外星' : byId[S.owner[tgt]].short}守軍</small><b>${count(options.defenders)}<em> 人</em></b><span>防禦加成 ×${options.defenseMult.toFixed(2)}</span></div>`;
     $('#attackRows').innerHTML = kinds(pool).map(k => `<div class="deployRow"><span>${unitIcon(k)} ${esc(U(k).name)}<small>${UNIT_CLASSES[U(k).cls]}・可出征 ${pool[k]}${S.army[src][k] > pool[k] ? `／現有 ${S.army[src][k]}` : ''}</small></span>
@@ -1144,7 +1149,7 @@
   });
 
   // ───────── 戰鬥畫面：玩家參戰時播放（觀戰或 ⚡ 速度時略過） ─────────
-  // 每種兵一排，逐合即時結算，一直打到其中一方全滅；玩家可用 ▲▼ 換自己的排、改變對位，攻方可戰略撤退
+  // 每種兵一排，逐合即時結算，打到一方全滅或沙漏見底；玩家可用 ▲▼ 換自己的排、改變對位，每邊可使用一次戰術，攻方可戰略撤退
   const BV = { open: false, skip: false, retreat: false, paused: false, fast: 1, step: 0, st: null, opts: null, view: null, side: null, sel: 0, wake: null };
   const watchBattle = (fa, fd) => S.mode === 'play' && S.speed < 99 && (fa === S.player || fd === S.player);
   const emblemOf = id => byId[id].portrait ? `<img src="${byId[id].portrait}" alt="">` : byId[id].short.slice(0, 1);
@@ -1154,7 +1159,7 @@
   async function battleSleep(ms, gen) {
     await new Promise(r => { BV.wake = r; setTimeout(r, ms / S.speed / BV.fast); });
     BV.wake = null;
-    while ((BV.paused || S.menuOpen) && gen === S.gen && !BV.skip && !BV.retreat) await new Promise(r => setTimeout(r, 120));
+    while ((BV.paused || S.menuOpen || !$('#bsTacticMenu').hidden) && gen === S.gen && !BV.skip && !BV.retreat) await new Promise(r => setTimeout(r, 120));
   }
   // 一排（直的）士兵：n = 這合開始時人數，left = 這合結束剩下的人數，dmg = 這排受到的傷害
   function battleCol(k, n, left, dmg, round) {
@@ -1192,7 +1197,9 @@
     const [left, right] = flip ? [def, att] : [att, def];
     const mine = left.side.mine && !final && !st.done;
     const myAims = left.key === 'A' ? st.aimA : st.aimD;
-    $('#bsTimer').innerHTML = `⏳ <b>${final ? '結算' : i ? `第 ${i} 合` : '對峙'}</b>${!final && st.adapted && st.adapted === i ? '<small> 敵方換排！</small>' : ''}`;
+    const remain = Math.max(0, Combat.TIME_LIMIT - (final ? st.round : (i || 0)));
+    $('#bsTimer').className = `bsTimer${remain <= 3 ? ' low' : ''}`;
+    $('#bsTimer').innerHTML = `⏳ 剩 <b>${remain}</b> 合${!final && st.adapted && st.adapted === i ? '<small> 敵方換排！</small>' : ''}`;
     $('#bsSides').innerHTML = bsSide('left', left.role, left.side, after[left.key], start[left.key]) + '<span class="bsVs">VS</span>'
       + bsSide('right', right.role, right.side, after[right.key], start[right.key]);
     $('#bsField').className = 'bsField' + (clash ? ' clash' : '') + (flip ? ' flip' : '');
@@ -1231,10 +1238,14 @@
     $('#battleScreen').hidden = false;
     renderBattleCtrls();
     drawBattle(0);
+    $('#bsTacticMenu').hidden = true;
+    $('#bsFloat').hidden = true;
+    renderTacticBtn();
     $('#bsSkip').focus();
     await battleSleep(1400, gen);
     while (!st.done && !BV.retreat && gen === S.gen) {
       if (BV.skip) { while (!st.done) Combat.step(st, options); break; }
+      maybeAiTactic(st);
       Combat.step(st, options);
       BV.step = st.round;
       drawBattle(st.round);
@@ -1246,12 +1257,15 @@
   async function finishBattle(r, gen) {
     drawBattle(null, r);
     const stamps = BV.view.stamps || {};
-    const [text, cls] = r.retreated ? ['戰略撤退', 'retreat'] : r.win ? [stamps.win || '攻陷！', 'win'] : [stamps.hold || '守住！', 'hold'];
+    const [text, cls] = r.retreated ? ['戰略撤退', 'retreat'] : r.timeout ? ['時間到・守住！', 'hold'] : r.win ? [stamps.win || '攻陷！', 'win'] : [stamps.hold || '守住！', 'hold'];
     $('#bsStamp').className = `bsStamp ${cls}`;
     $('#bsStamp').innerHTML = `<b>${text}</b><small>攻方折損 ${r.lostA} 人・守方折損 ${r.lostD} 人</small>`;
     $('#bsStamp').hidden = false;
     $('#bsSkip').disabled = true;
     $('#bsRetreat').hidden = true;
+    $('#bsTacticMenu').hidden = true;
+    $('#bsFloat').hidden = true;
+    renderTacticBtn();
     $('#bsDone').hidden = false;
     $('#bsDone').focus();
     Object.assign(BV, { skip: false, retreat: false });
@@ -1267,6 +1281,60 @@
     $('#bsPause').textContent = BV.paused ? '▶' : '⏸';
     $('#bsPause').setAttribute('aria-label', BV.paused ? '繼續戰鬥' : '暫停戰鬥');
     $('#bsFast').textContent = `⏩ ${BV.fast}x`;
+  }
+  const tacticUnlocked = (key, research) => !!TACTICS[key]?.need?.(research || { atk: 0, def: 0, eco: 0 });
+  function renderTacticBtn() {
+    const btn = $('#bsTacticBtn');
+    $('#bsTacticWrap').hidden = !BV.side;
+    if (!BV.side) return;
+    const used = BV.st?.tacticUsed?.[BV.side];
+    if (used && TACTICS[used]) {
+      btn.disabled = true;
+      btn.textContent = `${TACTICS[used].icon} ${TACTICS[used].name}`;
+    } else {
+      btn.disabled = !BV.open || !!BV.st?.done;
+      btn.textContent = '🎴 戰術';
+    }
+  }
+  function fillTacticMenu() {
+    const research = S.research[S.player] || { atk: 0, def: 0, eco: 0 };
+    $('#bsTacticMenu').innerHTML = Object.entries(TACTICS).map(([key, t]) => {
+      const ok = tacticUnlocked(key, research);
+      const note = ok ? t.desc : t.unlock;
+      return `<button data-tactic="${key}"${ok ? '' : ' disabled'} title="${esc(note)}">${t.icon} ${esc(t.name)}<small>${esc(note)}</small></button>`;
+    }).join('');
+  }
+  function toggleTacticMenu() {
+    if (!BV.open || !BV.side || !BV.st || BV.st.done || BV.st.tacticUsed?.[BV.side]) return;
+    const menu = $('#bsTacticMenu');
+    menu.hidden = !menu.hidden;
+    if (!menu.hidden) fillTacticMenu();
+    $('#bsTacticBtn').setAttribute('aria-expanded', menu.hidden ? 'false' : 'true');
+  }
+  function shoutTactic(t) {
+    const el = $('#bsFloat');
+    el.textContent = `${t.icon} ${t.name}！`;
+    el.hidden = false;
+    el.classList.remove('show');
+    void el.offsetWidth;
+    el.classList.add('show');
+  }
+  function castTactic(key) {
+    if (!BV.open || !BV.side || !BV.st || BV.st.done || !tacticUnlocked(key, S.research[S.player])) return false;
+    if (!Combat.useTactic(BV.st, BV.side, key)) return false;
+    shoutTactic(TACTICS[key]);
+    $('#bsTacticMenu').hidden = true;
+    $('#bsTacticBtn').setAttribute('aria-expanded', 'false');
+    renderTacticBtn();
+    drawBattle(BV.step, null, true);
+    return true;
+  }
+  // 玩家觀戰時，守方 AI 可以在兵力掉到一半以下用一次戰術。略過與 ⚡ 不走這裡。
+  function maybeAiTactic(st) {
+    const ai = BV.view?.ai;
+    if (!ai || ai.side !== 'D') return;
+    const key = Combat.aiTactic(st, ai.research);
+    if (key && TACTICS[key]) shoutTactic(TACTICS[key]);
   }
   // 換排：把選取的我方那一排往前（靠城牆，delta = -1）或往後移，和相鄰那排對調
   function moveRow(delta) {
@@ -1310,6 +1378,12 @@
     BV.retreat = true;
     $('#bsRetreat').disabled = true;
     BV.wake?.();
+  });
+  $('#bsTacticBtn').addEventListener('click', () => { if (!$('#bsTacticBtn').disabled) toggleTacticMenu(); });
+  $('#bsTacticMenu').addEventListener('click', e => {
+    const b = e.target.closest?.('button[data-tactic]');
+    if (!b || b.disabled) return;
+    castTactic(b.dataset.tactic);
   });
 
   // ───────── 框選士兵＋箭頭指揮 ─────────
@@ -1865,6 +1939,7 @@
     if (e.key === 'Escape' && !$('#attackDialog').hidden) { $('#attackCancel').click(); return; }
     if (BV.open) {
       if (e.key === 'Escape') skipBattle();
+      if ((e.key === 't' || e.key === 'T') && !e.repeat) { e.preventDefault(); toggleTacticMenu(); }
       if (e.key === 'ArrowLeft' || e.key === 'ArrowRight') { e.preventDefault(); moveRow(e.key === 'ArrowRight' ? -1 : 1); } // 我方在左：→ 往前
       if (e.key === ' ' && e.target.tagName !== 'BUTTON') { e.preventDefault(); toggleBattlePause(); }
       return;
