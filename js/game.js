@@ -847,7 +847,7 @@
     if (!playerActive()) { S.sel = id; render(); return; }
     const mine = S.owner[id] === S.player;
     const sel = S.sel && S.owner[S.sel] === S.player ? S.sel : null;
-    // 調兵模式：點一個連通的己方縣市 → 開調兵視窗
+    // 調兵模式：點一個相鄰的己方縣市 → 開調兵視窗
     if (S.transferMode) {
       S.transferMode = false;
       if (sel && mine && id !== sel && reachable(sel).has(id)) return openTransfer(sel, id);
@@ -969,20 +969,20 @@
       <p class="hint">${r.win ? `剩餘攻方部隊進駐${byId[r.tgt].short}。` : r.retreated ? '攻方戰略撤退，殘兵已返回出兵縣市。' : '攻方全軍覆沒。'}出兵縣市今日行動已使用。</p>`;
   }
 
-  // 透過己方領土（含海路）連通的縣市
+  // 直接相鄰的己方縣市（含海上航線）。調過去的部隊當天不能再動，所以每天只能走一步。
   function reachable(from) {
-    const seen = new Set([from]);
-    const q = [from];
-    while (q.length) for (const n of ADJ[q.shift()]) if (!seen.has(n) && S.owner[n] === S.owner[from]) { seen.add(n); q.push(n); }
-    seen.delete(from);
+    const seen = new Set();
+    for (const n of ADJ[from]) if (S.owner[n] === S.owner[from]) seen.add(n);
     return seen;
   }
 
   function openTransfer(from, to) {
+    if (!from || !to || from === to || !ADJ[from]?.has(to) || S.owner[from] !== S.player || S.owner[to] !== S.player) return false;
     cancelEndTurnConfirm();
     S.tr = { from, to, amt: {} };
     $('#transfer').hidden = false;
     renderTransfer();
+    return true;
   }
   function limitTransferAmt(tr) {
     const fresh = freshArmy(tr.from);
@@ -1035,7 +1035,7 @@
   function confirmTransfer() {
     if (!playerActive() || !S.tr) return;
     const { from, to, amt } = S.tr;
-    if (!from || !to || from === to || S.owner[from] !== S.player || S.owner[to] !== S.player) return;
+    if (!from || !to || from === to || !ADJ[from]?.has(to) || S.owner[from] !== S.player || S.owner[to] !== S.player) return;
     const asked = Object.values(amt).some(n => n > 0);
     limitTransferAmt(S.tr);
     const moving = {};
@@ -1057,7 +1057,7 @@
   $('#trRows').addEventListener('click', e => { const b = e.target.closest('button[data-k]'); if (b) changeTransfer(b.dataset.k, b.dataset.d); });
   $('#trOk').addEventListener('click', confirmTransfer);
   $('#trCancel').addEventListener('click', () => { $('#transfer').hidden = true; });
-  $('#trSwap').addEventListener('click', () => openTransfer(S.tr.to, S.tr.from));
+  $('#trSwap').addEventListener('click', () => { if (S.tr) openTransfer(S.tr.to, S.tr.from); });
 
   function recruit(k) {
     cancelEndTurnConfirm();
@@ -1313,7 +1313,7 @@
   });
 
   // ───────── 框選士兵＋箭頭指揮 ─────────
-  // 在己方兵力格上拖曳出框框選士兵，放開後出現箭頭：藍色＝調兵到己方縣市、紅色＝進攻相鄰敵方縣市
+  // 在己方兵力格上拖曳出框框選士兵，放開後出現箭頭：藍色＝調到相鄰的己方縣市、紅色＝進攻相鄰敵方縣市
   const cellUnits = a => kinds(a).sort((x, y) => UNIT_KEYS.indexOf(U(x).cls) - UNIT_KEYS.indexOf(U(y).cls)).flatMap(k => Array(a[k]).fill(k));
   let box = null, aimEl = null;
   const pickedCells = id => S.aim?.src === id ? S.aim.cells : box?.src === id ? box.cells : new Set();
@@ -1348,7 +1348,7 @@
     const src = S.aim?.src;
     if (!src || !id || id === src) return { kind: null };
     if (S.owner[id] === S.player) {
-      if (!reachable(src).has(id)) return { kind: null, reason: '沒有相連的己方領土可以調兵過去' };
+      if (!reachable(src).has(id)) return { kind: null, reason: '只能調到相鄰的己方縣市' };
       return room(id) ? { kind: 'move' } : { kind: null, reason: `${byId[id].short}已滿 ${MAX_TROOPS} 人` };
     }
     if (!ADJ[src].has(id)) return { kind: null, reason: '只能進攻相鄰的敵方縣市' };
@@ -1644,9 +1644,9 @@
       html += `<div class="recruitHead"><b>🪖 招兵到${c.short}</b><span>💰 目前 <b>${fmtMoney(S.money[f])}</b></span></div>
         <div class="recruit">${unitsOf(f).map(k => `<button data-u="${k}" class="${U(k).owner ? 'custom' : ''}" ${S.money[f] < unitCost(k, id) || !room(id) ? 'disabled' : ''} title="${U(k).desc}">
         ${unitIcon(k)} ${esc(U(k).name)}<br><small>${unitCost(k, id)} 萬・攻${U(k).atk}/血${U(k).hp}・${UNIT_CLASSES[U(k).cls]}</small></button>`).join('')}</div>
-        <button id="trBtn" class="trBtn ${S.transferMode ? 'on' : ''}" ${reachable(id).size ? '' : 'disabled'}>🚚 ${S.transferMode ? '點地圖上綠框的己方縣市（再按一次取消）' : reachable(id).size ? '調兵到其他己方縣市' : '調兵（還沒有其他相連的己方縣市）'}</button>
+        <button id="trBtn" class="trBtn ${S.transferMode ? 'on' : ''}" ${reachable(id).size ? '' : 'disabled'}>🚚 ${S.transferMode ? '點地圖上綠框的相鄰己方縣市（再按一次取消）' : reachable(id).size ? '調兵到相鄰的己方縣市' : '調兵（還沒有相鄰的己方縣市）'}</button>
         <label class="half"><input type="checkbox" id="halfChk" ${S.sendHalf ? 'checked' : ''}> 進攻時只派一半兵力（其餘留守）</label>
-        <p class="hint boxHint">🖱️ 在地圖的兵力格上<b>拖曳框選</b>士兵（縮小時從縣市圓點拖曳＝全軍），再點目標：<b class="hl-r">紅色箭頭</b>進攻、<b class="hl-b">藍色箭頭</b>調兵</p>
+        <p class="hint boxHint">🖱️ 在地圖的兵力格上<b>拖曳框選</b>士兵（縮小時從縣市圓點拖曳＝全軍），再點目標：<b class="hl-r">紅色箭頭</b>進攻、<b class="hl-b">藍色箭頭</b>調到相鄰的己方縣市（每支部隊每天一次）</p>
         <p class="hint">${stunned(id) ? `😵 被困住了，到第 ${S.stun[id]} 天都無法出兵` : acted ? '⛔ 這個縣市今天已經出兵過了（還能招兵、調兵）' : count(freshArmy(id)) <= 1 && count(a) > 1 ? '⛔ 調入的部隊今天不能出征' : count(a) > 1 ? '👉 點擊<b class="hl-r">閃爍紅框</b>的敵方縣市，配置出征部隊' : count(a) === 1 ? '至少留 1 人守家，招兵後才能出征' : '先招兵才能出擊'}</p>`;
     }
     box.innerHTML = html;

@@ -57,7 +57,7 @@ function fixture() {
   }`, context);
   let source = fs.readFileSync('js/game.js', 'utf8');
   const at = source.lastIndexOf('})();');
-  source = source.slice(0, at) + `Object.assign(harness, { S, initState, runLoop, endPlayerTurn, requestEndTurn, doAttack, saveCheckpoint, loadCheckpoint, saveRules, render, buildFacility, produceBuildings, income, defMult, openAttack, showStart, newGame, recruit, confirmTransfer, changeTransfer, freshArmy, checkEnd, startInvasion, doExpedition, invasionRaid, expeditionAllowed, borderThreat, setPosture, atkMult, aiTurn, BV, startAim, aimAt, pickedArmy, nextTurn, openSkillPicker, useSkill, aiUseSkills });` + source.slice(at);
+  source = source.slice(0, at) + `Object.assign(harness, { S, initState, runLoop, endPlayerTurn, requestEndTurn, doAttack, saveCheckpoint, loadCheckpoint, saveRules, render, buildFacility, produceBuildings, income, defMult, openAttack, showStart, newGame, recruit, confirmTransfer, changeTransfer, freshArmy, reachable, checkEnd, startInvasion, doExpedition, invasionRaid, expeditionAllowed, borderThreat, setPosture, atkMult, aiTurn, BV, startAim, aimAt, pickedArmy, nextTurn, openSkillPicker, useSkill, aiUseSkills });` + source.slice(at);
   vm.runInContext(source, context);
   const h = context.harness;
   h.initState('play', 'taipei');
@@ -746,6 +746,78 @@ test('transferred troops cannot attack or move again the same turn, and a county
   h.openAttack('newtaipei', 'keelung');
   assert.match(get('#attackEstimate').innerHTML, /調入的部隊今天不能出征/);
   assert.equal(get('#attackConfirm').disabled, true);
+});
+
+test('a transfer only reaches an adjacent own county, and each troop moves once that day', () => {
+  const { h, get } = fixture();
+  h.S.owner.newtaipei = h.S.owner.taoyuan = h.S.owner.keelung = h.S.owner.lienchiang = h.S.owner.kinmen = 'taipei';
+  h.S.army.taipei = { inf: 6 };
+  h.S.army.newtaipei = { inf: 2 };
+  h.S.army.taoyuan = { inf: 1 };
+  h.S.army.keelung = { inf: 3 };
+  h.S.army.lienchiang = { inf: 1 };
+  h.S.army.kinmen = { inf: 1 };
+  h.S.army.yilan = { inf: 4 };
+
+  assert.deepEqual([...h.reachable('taipei')].sort(), ['newtaipei']);
+  assert.equal(h.reachable('keelung').has('lienchiang'), true, 'sea links count as adjacent');
+  assert.equal(h.reachable('keelung').has('kinmen'), false, 'a sea route does not skip the county in between');
+
+  h.S.tr = { from: 'taipei', to: 'taoyuan', amt: { inf: 3 } };
+  h.confirmTransfer();
+  assert.equal(h.S.army.taipei.inf, 6, 'non-adjacent own county is rejected');
+  assert.equal(h.S.army.taoyuan.inf, 1);
+
+  h.S.tr = { from: 'keelung', to: 'kinmen', amt: { inf: 1 } };
+  h.confirmTransfer();
+  assert.equal(h.S.army.keelung.inf, 3);
+  assert.equal(h.S.army.kinmen.inf, 1);
+
+  h.S.tr = { from: 'newtaipei', to: 'yilan', amt: { inf: 1 } };
+  h.confirmTransfer();
+  assert.equal(h.S.army.newtaipei.inf, 2, 'an adjacent county owned by someone else is rejected');
+  assert.equal(h.S.army.yilan.inf, 4);
+  assert.equal(h.S.owner.yilan, 'yilan');
+
+  h.S.tr = { from: 'taipei', to: 'newtaipei', amt: { inf: 4 } };
+  h.confirmTransfer();
+  assert.equal(h.S.army.taipei.inf, 2);
+  assert.equal(h.S.army.newtaipei.inf, 6);
+  assert.deepEqual({ ...h.S.moved.newtaipei }, { inf: 4 });
+
+  get('#trSwap').handlers.click();
+  assert.equal(h.S.tr.from, 'newtaipei');
+  assert.equal(h.S.tr.to, 'taipei');
+  h.changeTransfer('inf', 'max');
+  assert.equal(h.S.tr.amt.inf, 2, 'reverse direction only offers troops that have not moved');
+  h.confirmTransfer();
+  assert.equal(h.S.army.newtaipei.inf, 4);
+  assert.equal(h.S.army.taipei.inf, 4);
+  assert.equal(h.S.moved.newtaipei.inf, 4);
+  assert.equal(h.S.moved.taipei.inf, 2);
+
+  h.S.tr = { from: 'taipei', to: 'taoyuan', amt: { inf: 1 } };
+  get('#trSwap').handlers.click();
+  assert.equal(h.S.tr.from, 'taipei', 'swap refuses a non-adjacent pair');
+  assert.equal(h.S.tr.to, 'taoyuan');
+  assert.equal(h.S.tr.amt.inf, 1);
+
+  h.S.tr = { from: 'keelung', to: 'lienchiang', amt: { inf: 2 } };
+  h.confirmTransfer();
+  assert.equal(h.S.army.keelung.inf, 1);
+  assert.equal(h.S.army.lienchiang.inf, 3);
+  assert.deepEqual({ ...h.S.moved.lienchiang }, { inf: 2 });
+
+  delete h.S.moved.taipei;
+  h.S.army.taipei = { inf: 5 };
+  assert.ok(h.startAim('taipei', [0, 1]));
+  h.aimAt('taoyuan');
+  assert.ok(h.S.aim, 'a far own county is not a transfer target');
+  assert.equal(h.S.army.taoyuan.inf, 1);
+  h.aimAt('newtaipei');
+  assert.equal(h.S.aim, null);
+  assert.equal(h.S.army.taipei.inf, 3);
+  assert.equal(h.S.army.newtaipei.inf, 6);
 });
 
 test('only fresh troops can be selected, and the attack dialog will not deploy moved ones', () => {
