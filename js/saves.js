@@ -52,10 +52,13 @@ const GameSaves = (() => {
       || !Array.isArray(s.acted) || !s.acted.every(hasId) || !Array.isArray(s.library) || !s.library.every(hasSkill)
       || !record(s.slots) || !record(s.skillReady) || !record(s.buff) || !record(s.stun)) throw new Error('回合資料損毀');
     for (const [id, slots] of Object.entries(s.slots)) {
-      if (!hasId(id) || s.owner[id] !== s.player || !Array.isArray(slots) || slots.length !== 2 || slots[0] !== id
-        || (slots[1] !== null && (!hasSkill(slots[1]) || !s.library.includes(slots[1])))) throw new Error('技能欄損毀');
+      if (!hasId(id) || !Array.isArray(slots) || slots.length !== 2 || slots[0] !== id
+        || (slots[1] !== null && !hasSkill(slots[1]))) throw new Error('技能欄損毀');
+      // 舊版可把地域技能裝進自訂欄；改版後自訂欄只收 10 種自訂技能，其餘清空重設
+      if (slots[1] !== null && !Object.hasOwn(rules.customSkills || {}, slots[1])) slots[1] = null;
     }
-    if (ids.some(id => s.owner[id] === s.player && !Object.hasOwn(s.slots, id))) throw new Error('技能欄不完整');
+    // 舊版只有玩家縣市有技能欄；補齊後 AI 會在自己的回合挑選
+    for (const id of ids) if (!Object.hasOwn(s.slots, id)) s.slots[id] = [id, null];
     for (const [key, n] of Object.entries(s.skillReady)) if (!/^([a-z]+):[01]$/.test(key) || !hasId(key.split(':')[0]) || !integer(n)) throw new Error('技能冷卻損毀');
     for (const [id, n] of Object.entries(s.stun)) if (!hasId(id) || !integer(n)) throw new Error('狀態資料損毀');
     for (const [id, b] of Object.entries(s.buff)) {
