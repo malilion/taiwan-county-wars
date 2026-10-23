@@ -192,6 +192,12 @@ main { flex: 1; display: flex; min-height: 0; }
   padding: 24px; width: min(720px, 100%); max-height: 92vh; overflow-y: auto;
 }
 .dialog h2 { margin: 0; font-size: 32px; font-weight: 900; text-align: center; }
+.startHead { position: relative; display: flex; align-items: center; justify-content: center; }
+.startHead h2 { flex: 1; }
+.startHead #sfxBtnStart {
+  position: absolute; right: 0; top: 50%; transform: translateY(-50%);
+  min-width: 44px; min-height: 44px; font-size: 22px; border-radius: 999px; padding: 6px 10px;
+}
 .dialog .tag { text-align: center; color: var(--muted); margin: 4px 0 16px; }
 .dialog h3 { font-size: 16px; margin: 0 0 8px; }
 #pickGrid { display: flex; flex-direction: column; gap: 8px; }

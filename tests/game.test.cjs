@@ -1374,11 +1374,48 @@ test('mute shortcut stays quiet without Sfx and ignores text fields', () => {
   const press = (key, target) => f.listeners.keydown.at(-1)({ key, repeat: false, preventDefault() {}, target: target || { tagName: 'DIV' } });
   assert.equal(f.get('#sfxBtn').textContent, '🔇');
   assert.equal(f.get('#sfxBtn').title, '音效：關');
+  assert.equal(f.get('#sfxBtnStart').textContent, '🔇');
+  assert.equal(f.get('#sfxBtnStart').title, '音效：關');
   assert.doesNotThrow(() => press('m'));
   assert.doesNotThrow(() => press('M', { tagName: 'INPUT' }));
   assert.doesNotThrow(() => press('m', { tagName: 'SELECT' }));
   f.get('#sfxBtn').handlers.click();
   assert.equal(f.get('#sfxBtn').textContent, '🔇');
+  f.get('#sfxBtnStart').handlers.click();
+  assert.equal(f.get('#sfxBtnStart').textContent, '🔇');
+});
+test('the start screen can toggle mute with the in-dialog button and the M key', () => {
+  const f = fixture(), { get } = f;
+  let muted = true;
+  f.context.Sfx = { muted: () => muted, toggle() { muted = !muted; return muted; } };
+  const press = (key, target) => f.listeners.keydown.at(-1)({
+    key, repeat: false, preventDefault() {}, target: target || { tagName: 'DIV' },
+  });
+  assert.equal(get('#modal').hidden, false);
+  assert.equal(get('#startView').hidden, false);
+  press('m');
+  assert.equal(muted, false);
+  assert.equal(get('#sfxBtn').textContent, '🔊');
+  assert.equal(get('#sfxBtnStart').textContent, '🔊');
+  assert.equal(get('#sfxBtnStart').title, '音效：開');
+  get('#sfxBtnStart').handlers.click();
+  assert.equal(muted, true);
+  assert.equal(get('#sfxBtn').textContent, '🔇');
+  assert.equal(get('#sfxBtnStart').textContent, '🔇');
+  press('m');
+  assert.equal(muted, false);
+  get('#attackDialog').hidden = false;
+  press('m');
+  assert.equal(muted, false, 'M stays quiet in the attack dialog');
+  get('#attackDialog').hidden = true;
+  get('#startView').hidden = true;
+  press('m');
+  assert.equal(muted, false, 'M stays quiet on the end-game modal');
+  get('#modal').hidden = true;
+  press('M', { tagName: 'INPUT' });
+  assert.equal(muted, false, 'M stays quiet while typing');
+  press('m');
+  assert.equal(muted, true);
 });
 
 test('synthesized sfx stays silent without AudioContext, defaults to muted, and persists the toggle', () => {
@@ -1387,6 +1424,8 @@ test('synthesized sfx stays silent without AudioContext, defaults to muted, and 
   assert.ok(html.indexOf('js/sfx.js?v=20261023c') !== -1 && html.indexOf('js/sfx.js?v=20261023c') < html.indexOf('js/game.js'), 'sfx.js loads before game.js');
   assert.match(html, /id="sfxBtn"[^>]*aria-label="音效：關"/);
   assert.match(html, /id="sfxBtn"[^>]*title="音效：關"/);
+  assert.match(html, /id="sfxBtnStart"[^>]*aria-label="音效：關"/);
+  assert.match(html, /id="sfxBtnStart"[^>]*title="音效：關"/);
   assert.match(readme, /🔇／🔊/);
   assert.match(readme, /預設靜音/);
 
