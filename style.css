@@ -460,6 +460,7 @@ button:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
   display: flex; align-items: center; justify-content: center; padding: 16px;
 }
 .battleScreen[hidden] { display: none; }
+.battleScreen:focus { outline: none; }
 .bsFrame {
   width: min(960px, 100%); max-height: 100%; display: flex; flex-direction: column;
   border: 1px solid var(--bs-edge); border-radius: 14px; overflow: hidden; background: var(--bs-band);
