@@ -1329,6 +1329,8 @@
     $('#bsRetreat').hidden = !view.canRetreat;
     $('#bsRetreat').disabled = false;
     $('#bsSkip').disabled = false;
+    $('#bsPause').disabled = false;
+    $('#bsFast').disabled = false;
     $('#bsDone').hidden = true;
     $('#bsStamp').hidden = true;
     $('#tip').hidden = true;
@@ -1371,6 +1373,8 @@
     $('#bsStamp').hidden = false;
     if (BV.view?.att?.mine || BV.view?.def?.mine) sfx(r.win ? 'capture' : 'hold', true);
     $('#bsSkip').disabled = true;
+    $('#bsPause').disabled = true;
+    $('#bsFast').disabled = true;
     $('#bsRetreat').hidden = true;
     $('#bsTacticMenu').hidden = true;
     $('#bsFloat').hidden = true;
