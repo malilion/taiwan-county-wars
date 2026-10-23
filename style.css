@@ -31,6 +31,7 @@ button {
 button:hover:not(:disabled) { border-color: var(--accent); }
 button:disabled { opacity: .45; cursor: default; }
 button.primary { background: #e85d04; border-color: #ff8c42; font-weight: 700; }
+button.danger { background: #9b2226; border-color: #ef476f; font-weight: 700; }
 button.wide { width: 100%; margin-top: 10px; padding: 10px; }
 
 #top {
@@ -192,6 +193,12 @@ main { flex: 1; display: flex; min-height: 0; }
   padding: 24px; width: min(720px, 100%); max-height: 92vh; overflow-y: auto;
 }
 .dialog h2 { margin: 0; font-size: 32px; font-weight: 900; text-align: center; }
+.startHead { position: relative; display: flex; align-items: center; justify-content: center; }
+.startHead h2 { flex: 1; }
+.startHead #sfxBtnStart {
+  position: absolute; right: 0; top: 50%; transform: translateY(-50%);
+  min-width: 44px; min-height: 44px; font-size: 22px; border-radius: 999px; padding: 6px 10px;
+}
 .dialog .tag { text-align: center; color: var(--muted); margin: 4px 0 16px; }
 .dialog h3 { font-size: 16px; margin: 0 0 8px; }
 #pickGrid { display: flex; flex-direction: column; gap: 8px; }
@@ -431,6 +438,8 @@ button:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
 .attackPresets button { flex: 1 0 25%; }
 .reserveWarning { padding: 10px; border-radius: 8px; background: #183746; color: #a9d5dc; font-size: 12px; line-height: 1.7; }
 .reserveWarning.danger { background: #402433; color: #ffadc0; border: 1px solid #834159; }
+.lowChanceWarning { margin: 10px 0 0; padding: 10px; border-radius: 8px; background: #402433; color: #ffadc0; border: 1px solid #834159; font-size: 13px; font-weight: 700; line-height: 1.6; }
+.lowChanceWarning[hidden] { display: none; }
 .defenseBox { padding: 12px; margin-top: 12px; border: 1px solid var(--line); border-radius: 10px; }
 .defenseHead { display: flex; align-items: center; justify-content: space-between; gap: 8px; font-size: 12px; }
 .defenseBox p { margin: 6px 0; font-size: 12px; }
@@ -451,6 +460,7 @@ button:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
   display: flex; align-items: center; justify-content: center; padding: 16px;
 }
 .battleScreen[hidden] { display: none; }
+.battleScreen:focus { outline: none; }
 .bsFrame {
   width: min(960px, 100%); max-height: 100%; display: flex; flex-direction: column;
   border: 1px solid var(--bs-edge); border-radius: 14px; overflow: hidden; background: var(--bs-band);
@@ -532,6 +542,13 @@ button:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
 .bsMove[hidden] { display: none; }
 .bsMove button { background: var(--accent); color: #0b1426; border: 1px solid var(--accent); border-radius: 999px; font-weight: 900; }
 .bsMove small { color: var(--muted); font-size: 12px; }
+.bsHold {
+  position: absolute; left: 50%; top: 10%; z-index: 3; transform: translateX(-50%);
+  pointer-events: none; text-align: center; white-space: nowrap;
+  background: rgba(11, 20, 38, .92); border: 1px solid var(--accent); border-radius: 10px;
+  padding: 10px 16px; font-weight: 700; font-size: clamp(14px, 2.4vw, 18px); color: var(--accent);
+}
+.bsHold[hidden] { display: none; }
 .bsFloat {
   position: absolute; left: 50%; top: 34%; z-index: 2; transform: translateX(-50%);
   pointer-events: none; font-weight: 900; font-size: clamp(28px, 6vw, 48px); white-space: nowrap;
