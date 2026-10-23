@@ -1220,7 +1220,7 @@
 
   // ───────── 戰鬥畫面：玩家參戰時播放（觀戰或 ⚡ 速度時略過） ─────────
   // 每種兵一排，逐合即時結算，打到一方全滅或沙漏見底；玩家可用 ▲▼ 換自己的排、改變對位，每邊可使用一次戰術，攻方可戰略撤退
-  const BV = { open: false, skip: false, retreat: false, paused: false, fast: 1, step: 0, st: null, opts: null, view: null, side: null, sel: 0, wake: null, returnFocus: null };
+  const BV = { open: false, skip: false, retreat: false, paused: false, endedPaused: false, fast: 1, step: 0, st: null, opts: null, view: null, side: null, sel: 0, wake: null, returnFocus: null };
   const watchBattle = (fa, fd) => S.mode === 'play' && S.speed < 99 && (fa === S.player || fd === S.player);
   const emblemOf = id => byId[id].portrait ? `<img src="${byId[id].portrait}" alt="">` : byId[id].short.slice(0, 1);
   const SHOW_PER_ROW = 8; // 一排最多畫 8 個，其餘用數字表示
@@ -1319,7 +1319,7 @@
   // 逐合即時結算，回傳戰果（撤退時取當下兵力）；遊戲被換掉則回傳 null
   async function playBattle(view, options, gen) {
     const st = Combat.setup(options);
-    Object.assign(BV, { open: true, skip: false, retreat: false, paused: false, holding: false, step: 0, st, opts: options, view,
+    Object.assign(BV, { open: true, skip: false, retreat: false, paused: false, endedPaused: false, holding: false, step: 0, st, opts: options, view,
       side: view.att.mine ? 'A' : view.def.mine ? 'D' : null, sel: 0 });
     // 開戰前先記下焦點；接著 keepBattleFocus 會把焦點移進戰鬥畫面。
     captureBattleReturnFocus();
@@ -1365,6 +1365,8 @@
     return Combat.finish(st, BV.retreat && !st.done);
   }
   async function finishBattle(r, gen) {
+    const endedPaused = BV.paused;
+    BV.endedPaused = endedPaused;
     drawBattle(null, r);
     const stamps = BV.view.stamps || {};
     const [text, cls] = r.retreated ? ['戰略撤退', 'retreat'] : r.timeout ? ['時間到・守住！', 'hold'] : r.win ? [stamps.win || '攻陷！', 'win'] : [stamps.hold || '守住！', 'hold'];
@@ -1372,6 +1374,10 @@
     $('#bsStamp').innerHTML = `<b>${text}</b><small>攻方折損 ${r.lostA} 人・守方折損 ${r.lostD} 人</small>`;
     $('#bsStamp').hidden = false;
     if (BV.view?.att?.mine || BV.view?.def?.mine) sfx(r.win ? 'capture' : 'hold', true);
+    // 戰果畫面不再暫停，否則 battleSleep 會一直等，⏸ 也會停在 ▶。
+    // 暫停中打完則不排 2400ms 自動關閉，等玩家自己關結算。
+    BV.paused = false;
+    renderBattleCtrls();
     $('#bsSkip').disabled = true;
     $('#bsPause').disabled = true;
     $('#bsFast').disabled = true;
@@ -1379,12 +1385,20 @@
     $('#bsTacticMenu').hidden = true;
     $('#bsFloat').hidden = true;
     $('#bsHold').hidden = true;
+    if (BV.st) BV.st.done = true;
     renderTacticBtn();
     $('#bsDone').hidden = false;
     keepBattleFocus($('#bsDone'));
     $('#bsDone').focus();
     Object.assign(BV, { skip: false, retreat: false });
-    await battleSleep(2400, gen);
+    if (endedPaused) {
+      while (!BV.skip && gen === S.gen && BV.open) {
+        await new Promise(resolve => { BV.wake = resolve; setTimeout(resolve, 200); });
+      }
+      BV.wake = null;
+    } else {
+      await battleSleep(2400, gen);
+    }
     if (gen === S.gen) closeBattle();
   }
   function closeBattle() {
@@ -1515,6 +1529,7 @@
   function skipBattle() { BV.skip = true; endDefenceHold(); BV.wake?.(); }
   function toggleBattlePause() {
     if (BV.holding) { endDefenceHold(); return; }
+    if (BV.st?.done || !$('#bsDone').hidden) return;
     BV.paused = !BV.paused; renderBattleCtrls();
   }
   $('#bsSkip').addEventListener('click', skipBattle);
@@ -2203,7 +2218,18 @@
         if (e.target?.tagName === 'BUTTON') return;
         if (!hasModifier(e)) {
           e.preventDefault();
-          if (!e.repeat) toggleBattlePause();
+          if (!e.repeat) {
+            if (!$('#bsDone').hidden) skipBattle();
+            else toggleBattlePause();
+          }
+        }
+      }
+      if (e.key === 'Enter') {
+        // 結算畫面且焦點不在按鈕上時，Enter 等於「繼續」。按鈕上則交給瀏覽器原生按下。
+        if (e.target?.tagName === 'BUTTON') return;
+        if (!hasModifier(e) && !$('#bsDone').hidden) {
+          e.preventDefault();
+          if (!e.repeat) skipBattle();
         }
       }
       return;
