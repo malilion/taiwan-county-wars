@@ -1522,6 +1522,56 @@ test('a player attack battle keeps focus on the battle screen', async () => {
   assert.notEqual(f.focused, get('#bsSkip'));
   await f.flush(); await attack;
 });
+test('after a battle ends ⏸ and ⏩ are disabled and Tab only cycles 繼續; a new battle re-enables them', async () => {
+  const f = fixture(), { h, get } = f;
+  h.S.army.taipei = { inf: 10 }; h.S.army.newtaipei = { inf: 2 };
+  const battle = h.doAttack('taipei', 'newtaipei', h.S.gen, false, { inf: 9 });
+  await untilStep(f, 0);
+  assert.equal(get('#bsPause').disabled, false);
+  assert.equal(get('#bsFast').disabled, false);
+  get('#bsPause').focus();
+  get('#bsSkip').handlers.click();
+  for (let i = 0; i < 50 && get('#bsDone').hidden; i++) await Promise.resolve();
+  assert.equal(get('#bsDone').hidden, false);
+  assert.equal(get('#bsPause').disabled, true);
+  assert.equal(get('#bsFast').disabled, true);
+  assert.equal(get('#bsSkip').disabled, true);
+  const focusables = h.battleFocusables();
+  assert.equal(focusables.length, 1);
+  assert.equal(focusables[0].id, 'bsDone');
+  assert.equal(focusables[0], get('#bsDone'));
+  assert.equal(f.focused, get('#bsDone'));
+  assert.equal(f.context.document.activeElement, get('#bsDone'));
+  for (const shiftKey of [false, true]) {
+    let prevented = false;
+    f.listeners.keydown.at(-1)({
+      key: 'Tab', shiftKey,
+      preventDefault() { prevented = true; },
+      target: get('#bsDone'),
+    });
+    assert.equal(prevented, true);
+    assert.equal(f.focused, get('#bsDone'));
+    assert.equal(f.context.document.activeElement, get('#bsDone'));
+  }
+  get('#bsDone').handlers.click();
+  await f.flush(); await battle;
+  h.S.over = false;
+  h.S.owner.newtaipei = 'newtaipei';
+  h.S.army.taipei = { inf: 10 };
+  h.S.army.newtaipei = { inf: 5 };
+  h.S.acted.delete('taipei');
+  delete h.S.moved.taipei;
+  delete h.S.moved.newtaipei;
+  const again = h.doAttack('taipei', 'newtaipei', h.S.gen, false, { inf: 4 });
+  await untilStep(f, 0);
+  assert.equal(get('#bsPause').disabled, false);
+  assert.equal(get('#bsFast').disabled, false);
+  assert.equal(get('#bsDone').hidden, true);
+  const open = h.battleFocusables();
+  assert.ok(open.includes(get('#bsPause')));
+  assert.ok(open.includes(get('#bsFast')));
+  await f.flush(); await again;
+});
 async function skipThenCloseBattle(f) {
   f.get('#bsSkip').handlers.click();
   for (let i = 0; i < 50 && f.get('#bsDone').hidden; i++) await Promise.resolve();
