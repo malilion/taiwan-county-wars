@@ -910,7 +910,7 @@
 
   const LOW_CHANCE = 10;
   function needsLowChanceConfirm(chance) {
-    return Number.isFinite(Number(chance)) && Number(chance) < LOW_CHANCE;
+    return Number.isFinite(Number(chance)) && Number(chance) <= LOW_CHANCE;
   }
   function armLowChanceWarning(chance) {
     const btn = $('#attackConfirm');
