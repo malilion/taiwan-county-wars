@@ -1337,7 +1337,7 @@
     $('#bsFloat').hidden = true;
     $('#bsHold').hidden = true;
     renderTacticBtn();
-    $('#bsSkip').focus();
+    $('#battleScreen').focus();
     sfx('attack');
     await holdForDefence(view, gen);
     if (gen !== S.gen) return null;
@@ -2066,10 +2066,20 @@
       return;
     }
     if (BV.open) {
-      if (e.key === 'Escape') skipBattle();
+      const mod = e.ctrlKey || e.metaKey || e.altKey;
+      // 按住 Ctrl、Cmd 或 Alt 時，Esc、S、空白留給瀏覽器快捷鍵。
+      if (e.key === 'Escape' && !mod) skipBattle();
+      if ((e.key === 's' || e.key === 'S') && !e.repeat && !mod) { e.preventDefault(); skipBattle(); }
       if ((e.key === 't' || e.key === 'T') && !e.repeat) { e.preventDefault(); toggleTacticMenu(); }
       if (e.key === 'ArrowLeft' || e.key === 'ArrowRight') { e.preventDefault(); moveRow(e.key === 'ArrowRight' ? -1 : 1); } // 我方在左：→ 往前
-      if (e.key === ' ' && e.target.tagName !== 'BUTTON') { e.preventDefault(); toggleBattlePause(); }
+      if (e.key === ' ') {
+        // 焦點在按鈕上時，空白鍵交給瀏覽器原生按下。
+        if (e.target?.tagName === 'BUTTON') return;
+        if (!mod) {
+          e.preventDefault();
+          if (!e.repeat) toggleBattlePause();
+        }
+      }
       return;
     }
     if (!$('#attackDialog').hidden || !$('#modal').hidden || !$('#designer').hidden || !$('#transfer').hidden || !$('#skillPicker').hidden || e.target.tagName === 'INPUT') return;
@@ -2077,7 +2087,6 @@
     if (e.key === 'e' || (e.key === 'Enter' && e.target.tagName !== 'BUTTON')) requestEndTurn();
     if (e.key === 'Escape') { S.sel = null; S.transferMode = false; clearAim(); render(); }
   });
-
   // 小地圖與縮放
   buildMinimap($('#minimap'), map.view);
   map.view.onChange(v => { $('#zoom').value = v.z; });
