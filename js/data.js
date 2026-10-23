@@ -96,6 +96,16 @@ const RESEARCH = {
   eco: { name: '經濟發展', icon: '💰', desc: '每日稅收 +15%' },
 };
 
+// 每場戰鬥每一方只能用一次戰術。效果在 combat.js。
+// 解鎖：鞭炮突擊一開始就能用；沙包牆要城防工事 Lv.1；
+// 衛生兵要經濟發展 Lv.1，或城防工事 Lv.2；煙霧彈要軍事訓練 Lv.2。
+const TACTICS = {
+  fire: { name: '鞭炮突擊', icon: '🧨', desc: '我方傷害 ×1.5，持續 3 合', unlock: '', need: () => true },
+  wall: { name: '沙包牆', icon: '🧱', desc: '我方受到的傷害 ×0.5，持續 3 合', unlock: '城防工事 Lv.1', need: r => r.def >= 1 },
+  heal: { name: '衛生兵', icon: '🩹', desc: '復活本戰各兵種損失的 30%（至少 1 人，不超過開戰人數）', unlock: '經濟發展 Lv.1 或城防工事 Lv.2', need: r => r.eco >= 1 || r.def >= 2 },
+  smoke: { name: '煙霧彈', icon: '🌫️', desc: '敵方下一合無法造成傷害', unlock: '軍事訓練 Lv.2', need: r => r.atk >= 2 },
+};
+
 // 難度：playerPeace / aiPeace = 前幾天 AI 不會攻擊玩家 / 不會互打；aiVsAi = AI 互打的機率；aggr = 進攻門檻倍率
 const DIFFICULTY = {
   easy: { name: '簡單', desc: '前 12 天和平發展，AI 很少互打，適合慢慢併吞', playerPeace: 12, aiPeace: 12, aiVsAi: 0.25, aggr: 1.4 },

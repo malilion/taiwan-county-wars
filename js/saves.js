@@ -1,7 +1,7 @@
 // Versioned local checkpoints; loading returns fresh data, never DOM/HTML.
 const GameSaves = (() => {
   const PREFIX = 'taiwan-war:v1:';
-  const FIELDS = ['mode', 'player', 'diffKey', 'day', 'turnIdx', 'current', 'sel', 'sendHalf', 'owner', 'army', 'money', 'research', 'aggr', 'units', 'unitSeq', 'skillReady', 'buff', 'stun', 'order', 'slots', 'buildings', 'invasion', 'posture'];
+  const FIELDS = ['mode', 'player', 'diffKey', 'day', 'turnIdx', 'current', 'sel', 'sendHalf', 'owner', 'army', 'money', 'research', 'aggr', 'units', 'unitSeq', 'skillReady', 'buff', 'stun', 'order', 'slots', 'buildings', 'invasion', 'posture', 'moved', 'playerStarted'];
   const integer = (n, max = 1000000000) => Number.isInteger(n) && n >= 0 && n <= max;
   const record = v => v && typeof v === 'object' && !Array.isArray(v) && Object.keys(v).every(k => !['__proto__', 'constructor', 'prototype'].includes(k));
   function encode(state, logs = []) {
@@ -46,6 +46,18 @@ const GameSaves = (() => {
         || Object.values(s.army[id]).reduce((a, b) => a + b, 0) > 25 || !integer(s.money[id])
         || !record(s.research[id]) || !['atk', 'def', 'eco'].every(k => integer(s.research[id][k], 5))
         || !Number.isFinite(s.aggr[id]) || s.aggr[id] < 1 || s.aggr[id] > 2) throw new Error('縣市數值損毀');
+    }
+    if (s.moved === undefined) s.moved = {}; // 舊版 v1 存檔沒有部隊行動紀錄
+    if (typeof s.playerStarted !== 'boolean') s.playerStarted = true; // 舊版沒有開局旗標，視為玩家已經行動過
+    if (!record(s.moved)) throw new Error('調動紀錄損毀');
+    for (const [id, troops] of Object.entries(s.moved)) {
+      if (!hasId(id) || !record(troops)) throw new Error('調動紀錄損毀');
+      let total = 0;
+      for (const [k, n] of Object.entries(troops)) {
+        if (!Object.hasOwn(s.units, k) || !integer(n, 25) || n > (s.army[id][k] || 0)) throw new Error('調動紀錄損毀');
+        total += n;
+      }
+      if (total > 25) throw new Error('調動紀錄損毀');
     }
     if (s.invasion !== null && (!rules.validateInvasion?.(s.invasion, s.day) || !ids.every(id => s.owner[id] === s.player))) throw new Error('入侵進度損毀');
     if (!ids.some(id => s.owner[id] === s.player) || (new Set(Object.values(s.owner)).size < 2 && s.invasion === null)

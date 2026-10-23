@@ -6,7 +6,7 @@
   <title>台灣縣市大戰</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@400;700;900&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="style.css?v=20261022m">
+  <link rel="stylesheet" href="style.css?v=20261023b">
 </head>
 <body>
   <header id="top">
@@ -16,6 +16,7 @@
       <div id="speed" class="seg">
         <button data-s="1" class="on">1x</button><button data-s="2">2x</button><button data-s="4">4x</button><button data-s="99">⚡</button>
       </div>
+      <button id="sfxBtn" aria-label="音效：關" title="音效：關">🔇</button>
       <button id="pauseBtn">⏸ 暫停</button>
       <button id="saveBtn" disabled>💾 存檔</button>
       <button id="newBtn">選單</button>
@@ -93,7 +94,7 @@
           <ul>
             <li>每天輪到你時會收到稅收（萬元），控制整個地區（北、中、南、東、離島）有額外加成。</li>
             <li>點選自己的縣市可以<b>招兵</b>（每個縣市最多 25 人）；每個縣市每天可以<b>出兵一次</b>，點相鄰敵方縣市後，配置兵力並確認出征（至少留 1 人守家）。</li>
-            <li>按「🚚 調兵」可以把部隊分配到任何<b>相連的己方縣市</b>，自選兵種與人數，不限次數。</li>
+            <li>按「🚚 調兵」只能把部隊調到<b>相鄰的己方縣市</b>（含海上航線），每支部隊每天只能移動一次。</li>
             <li>兵種相剋：🛵 機車 剋 💣 砲兵 剋 👺 八家將 剋 🪖 阿兵哥 剋 🛵 機車。</li>
             <li>每個縣市都有<b>兩個技能</b>：專屬的<b>固有技能（不能更換）</b>，加上從 <b>10 種自訂技能</b>挑一個。自訂技能設定後鎖定，<b>佔領別的縣市時可以重新設定</b>它的自訂技能。</li>
             <li>按「🛠️ 組建兵種」可以自己搭配武器＋防具＋坐騎，打造專屬部隊（最多 4 種）。</li>
@@ -124,7 +125,7 @@
       <div id="attackRows"></div>
       <p id="reserveWarning" class="reserveWarning" aria-live="polite"></p>
       <div id="attackEstimate" class="attackEstimate" aria-live="polite"></div>
-      <p id="attackHint" class="hint">每個縣市每日出兵一次；戰鬥打到一方全滅（可在戰鬥中戰略撤退），攻陷後駐守新領土。</p>
+      <p id="attackHint" class="hint">每個縣市每日出兵一次；最多 12 合，時間到而守軍仍在則守住（可在戰鬥中戰略撤退，也可使用一次戰術），攻陷後駐守新領土。</p>
       <div class="dzBtns"><button id="attackCancel">取消</button><button id="attackConfirm" class="primary">確認出征</button></div>
     </div>
   </div>
@@ -139,11 +140,16 @@
       <div id="bsSides" class="bsSides"></div>
       <div class="bsStage">
         <div id="bsField" class="bsField"></div>
+        <div id="bsFloat" class="bsFloat" hidden aria-live="polite"></div>
         <div id="bsStamp" class="bsStamp" hidden role="status"></div>
       </div>
       <footer class="bsFoot">
         <div class="bsCtrl">
           <button id="bsPause" aria-label="暫停戰鬥">⏸</button><button id="bsFast" aria-label="切換戰鬥速度">⏩ 1x</button><button id="bsSkip">⏭ 略過</button>
+        </div>
+        <div id="bsTacticWrap" class="bsTacticWrap" hidden>
+          <button id="bsTacticBtn" aria-haspopup="menu" aria-expanded="false">🎴 戰術</button>
+          <div id="bsTacticMenu" class="bsTacticMenu" hidden role="menu"></div>
         </div>
         <div id="bsMove" class="bsMove" hidden>
           <button id="bsBack" aria-label="選取的排往後移">◀ 往後</button><button id="bsFwd" aria-label="選取的排往前移">往前 ▶</button>
@@ -167,7 +173,7 @@
   <div id="transfer" class="overlay" hidden>
     <div class="dialog trDialog">
       <h2 id="trTitle"></h2>
-      <p class="tag">選擇要調動的兵種與人數（每個縣市最多 25 人）</p>
+      <p class="tag">只能調到相鄰的己方縣市，每支部隊每天只能移動一次（每個縣市最多 25 人）</p>
       <div id="trRows"></div>
       <p id="trInfo"></p>
       <div class="dzBtns">
@@ -195,12 +201,13 @@
   </div>
 
   <script src="https://cdn.jsdelivr.net/npm/d3-delaunay@6.0.4/dist/d3-delaunay.min.js"></script>
-  <script src="js/data.js?v=20261022m"></script>
+  <script src="js/data.js?v=20261023b"></script>
   <script src="js/map.js?v=20261022m"></script>
-  <script src="js/combat.js?v=20261022m"></script>
+  <script src="js/combat.js?v=20261023b"></script>
   <script src="js/invasion.js?v=20261022m"></script>
   <script src="js/saves.js?v=20261022m"></script>
-  <script src="js/game.js?v=20261022m"></script>
+  <script src="js/sfx.js?v=20261023c"></script>
+  <script src="js/game.js?v=20261023c"></script>
 </body>
 </html>
 

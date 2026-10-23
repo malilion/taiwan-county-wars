@@ -7,7 +7,20 @@ const GameSaves = require('../js/saves.js');
 
 function fixture() {
   class Element {
-    constructor() { this.children = []; this.hidden = true; this.style = {}; this.dataset = {}; this.handlers = {}; this.classList = { toggle() {}, add() {}, remove() {} }; }
+    constructor() {
+      this.children = []; this.hidden = true; this.style = {}; this.dataset = {}; this.handlers = {};
+      const classes = new Set();
+      this.classList = {
+        add: (...names) => { for (const name of names) classes.add(name); },
+        remove: (...names) => { for (const name of names) classes.delete(name); },
+        toggle(name, on) {
+          const next = on === undefined ? !classes.has(name) : !!on;
+          if (next) classes.add(name); else classes.delete(name);
+          return next;
+        },
+        contains: name => classes.has(name),
+      };
+    }
     set innerHTML(value) { this.html = value; this.children = []; }
     get innerHTML() { return this.html || ''; }
     get textContent() { return this.text ?? this.innerHTML.replace(/<[^>]*>/g, ''); }
@@ -24,10 +37,10 @@ function fixture() {
   }
   const knownIds = new Set([...fs.readFileSync('index.html', 'utf8').matchAll(/id="([^"]+)"/g)].map(m => '#' + m[1]));
   const elements = new Map(), get = id => { if (!knownIds.has(id)) throw Error('Missing DOM element: ' + id); if (!elements.has(id)) elements.set(id, new Element()); return elements.get(id); };
-  const timers = [], storage = new Map();
+  const timers = [], storage = new Map(), listeners = {};
   const context = vm.createContext({
     console, harness: {}, confirm: () => true,
-    document: { querySelector: get, querySelectorAll: () => [], addEventListener() {}, createElement: () => new Element() },
+    document: { querySelector: get, querySelectorAll: () => [], addEventListener(type, fn) { (listeners[type] ||= []).push(fn); }, createElement: () => new Element() },
     window: { addEventListener() {} }, localStorage: { getItem: k => storage.get(k) || null, setItem: (k, v) => storage.set(k, v) },
     setTimeout: fn => { timers.push(fn); return timers.length; }, clearTimeout() {},
     MAP_W: 640, MAP_H: 830, svgEl: () => new Element(), buildMinimap() {},
@@ -44,17 +57,17 @@ function fixture() {
   }`, context);
   let source = fs.readFileSync('js/game.js', 'utf8');
   const at = source.lastIndexOf('})();');
-  source = source.slice(0, at) + `Object.assign(harness, { S, initState, runLoop, endPlayerTurn, doAttack, saveCheckpoint, loadCheckpoint, saveRules, render, buildFacility, produceBuildings, income, defMult, openAttack, showStart, newGame, recruit, confirmTransfer, checkEnd, startInvasion, doExpedition, invasionRaid, expeditionAllowed, borderThreat, setPosture, atkMult, aiTurn, BV, startAim, aimAt, pickedArmy, nextTurn, openSkillPicker, useSkill, aiUseSkills });` + source.slice(at);
+  source = source.slice(0, at) + `Object.assign(harness, { S, initState, runLoop, endPlayerTurn, requestEndTurn, doAttack, saveCheckpoint, loadCheckpoint, saveRules, render, buildFacility, produceBuildings, income, defMult, openAttack, showStart, newGame, recruit, confirmTransfer, changeTransfer, freshArmy, reachable, checkEnd, startInvasion, doExpedition, invasionRaid, expeditionAllowed, borderThreat, setPosture, atkMult, aiTurn, BV, startAim, aimAt, pickedArmy, nextTurn, openSkillPicker, useSkill, aiUseSkills });` + source.slice(at);
   vm.runInContext(source, context);
   const h = context.harness;
   h.initState('play', 'taipei');
-  Object.assign(h.S, { current: 'taipei', diff: vm.runInContext('DIFFICULTY.easy', context), diffKey: 'easy', menuOpen: false });
+  Object.assign(h.S, { current: 'taipei', diff: vm.runInContext('DIFFICULTY.easy', context), diffKey: 'easy', menuOpen: false, playerStarted: true });
   h.S.order = ['taipei', ...h.S.order.filter(x => x !== 'taipei')];
-  return { h, context, elements, storage, get, timers, async flush() { for (let i = 0; i < 100; i++) { if (timers.length) timers.shift()(); await Promise.resolve(); } } };
+  return { h, context, elements, storage, get, timers, listeners, async flush() { for (let i = 0; i < 100; i++) { if (timers.length) timers.shift()(); await Promise.resolve(); } } };
 }
 const dataContext = vm.createContext({});
-vm.runInContext(fs.readFileSync('js/data.js', 'utf8') + '\nthis.data = { UNITS, COUNTERS };', dataContext);
-const { UNITS: units, COUNTERS: counters } = dataContext.data;
+vm.runInContext(fs.readFileSync('js/data.js', 'utf8') + '\nthis.data = { UNITS, COUNTERS, TACTICS };', dataContext);
+const { UNITS: units, COUNTERS: counters, TACTICS } = dataContext.data;
 const options = (sent, defenders) => ({ sent, defenders, units, counters, attackMult: 1, defenseMult: 1, defenderAttack: 1 });
 
 test('deployment preserves a home defender for full, half and singleton armies', () => {
@@ -428,14 +441,15 @@ async function untilStep(f, step) {
 test('battles run until one side is wiped out and retreat keeps the current survivors', () => {
   for (const [a, d] of [[{ inf: 12, moto: 3 }, { gen: 14 }], [{ elite: 3 }, { inf: 25 }], [{ inf: 2 }, { gen: 20 }]]) {
     const r = Combat.resolve(options(a, d));
-    assert.ok(Combat.count(r.A) === 0 || Combat.count(r.D) === 0, 'no round limit: someone is annihilated');
+    assert.ok(Combat.count(r.A) === 0 || Combat.count(r.D) === 0, 'short matchups still end in a wipe');
+    assert.equal(r.timeout, false);
     assert.deepEqual(r.rounds.at(-1).A, r.A);
   }
   const o = options({ inf: 12, moto: 3 }, { gen: 14 }), st = Combat.setup(o);
   assert.equal(Combat.finish(st, true).lostA, 0);
   Combat.step(st, o, () => 0.5);
   const mid = Combat.finish(st, true);
-  assert.ok(mid.retreated); assert.equal(mid.win, false);
+  assert.ok(mid.retreated); assert.equal(mid.win, false); assert.equal(mid.timeout, false);
   assert.equal(Combat.count(mid.A) + mid.lostA, 15); assert.equal(Combat.count(mid.D) + mid.lostD, 14);
 });
 test('each unit type fights in its own row; attackers line up against what they counter', () => {
@@ -466,6 +480,47 @@ test('player battles open the battle screen and close it after the result', asyn
   await f.flush(); await battle;
   assert.equal(get('#battleScreen').hidden, true); assert.equal(h.BV.open, false);
 });
+test('the hourglass counts down, then a stalled defence sends the attacker home', async () => {
+  const f = fixture(), { h, get } = f;
+  h.S.units.inf = { ...h.S.units.inf, atk: 0, hp: 1e9 };
+  h.S.army.taipei = { inf: 8 }; h.S.army.newtaipei = { inf: 8 };
+  const battle = h.doAttack('taipei', 'newtaipei', h.S.gen, false, { inf: 6 });
+  await untilStep(f, 0);
+  assert.match(get('#bsTimer').innerHTML, /⏳ 剩 <b>12<\/b> 合/);
+  assert.equal(get('#bsTimer').className, 'bsTimer');
+  await untilStep(f, 9);
+  assert.match(get('#bsTimer').innerHTML, /⏳ 剩 <b>3<\/b> 合/);
+  assert.equal(get('#bsTimer').className, 'bsTimer low');
+  await f.flush(); await battle;
+  const r = h.S.lastBattle;
+  assert.equal(r.timeout, true); assert.equal(r.win, false); assert.equal(r.retreated, false);
+  assert.equal(r.rounds.length - 1, Combat.TIME_LIMIT);
+  assert.ok(Combat.count(r.A) > 0);
+  assert.equal(h.S.owner.newtaipei, 'newtaipei');
+  assert.equal(h.S.army.taipei.inf, 8);
+  assert.equal(h.S.army.newtaipei.inf, 8);
+  assert.match(get('#bsStamp').innerHTML, /時間到・守住！/);
+  assert.match(get('#bsStamp').className, /\bhold\b/);
+  assert.ok(get('#log').children.some(c => c.innerHTML.includes('時間到') && c.innerHTML.includes('守住了')));
+});
+test('a watched AI defender spends one tactic once its numbers fall below half', async () => {
+  const f = fixture(), { h } = f;
+  vm.runInContext('Math.random = () => 0.5', f.context);
+  h.S.units.inf = { ...h.S.units.inf, atk: 20, hp: 10 };
+  h.S.research.newtaipei.def = 0;
+  h.S.army.taipei = { inf: 11 }; h.S.army.newtaipei = { inf: 10 };
+  const battle = h.doAttack('taipei', 'newtaipei', h.S.gen, false, { inf: 10 });
+  await untilStep(f, 1);
+  assert.equal(h.BV.st.tacticUsed.D, undefined);
+  assert.ok(Combat.count(h.BV.st.D) * 2 < h.BV.st.d0);
+  await untilStep(f, 2);
+  assert.equal(h.BV.st.tacticUsed.D, 'fire');
+  assert.match(f.get('#bsFloat').textContent, /鞭炮突擊！/);
+  h.S.research.newtaipei.def = 1;
+  await f.flush(); await battle;
+  assert.equal(h.BV.st.tacticUsed.D, 'fire', 'the defender does not get a second tactic');
+  assert.equal(h.S.owner.newtaipei, 'newtaipei');
+});
 test('strategic retreat keeps that clash\'s survivors, spares the target and uses the action', async () => {
   const f = fixture(), { h, get } = f;
   h.S.army.taipei = { inf: 21 }; h.S.army.newtaipei = { gen: 20 };
@@ -487,6 +542,38 @@ test('defending players watch without a retreat button; lightning speed and AI-o
   const defend = h.doAttack('newtaipei', 'taipei', h.S.gen, false, { inf: 4 });
   await untilStep(f, 0);
   assert.equal(get('#bsRetreat').hidden, true);
+  assert.equal(get('#bsTacticWrap').hidden, false);
+  const press = key => f.listeners.keydown.at(-1)({ key, preventDefault() {}, target: { tagName: 'DIV' } });
+  press('t');
+  assert.equal(get('#bsTacticMenu').hidden, false, 't opens the tactic menu');
+  press('t');
+  assert.equal(get('#bsTacticMenu').hidden, true, 't closes the tactic menu');
+  press('T');
+  get('#bsTacticBtn').handlers.click();
+  assert.equal(get('#bsTacticMenu').hidden, true, 'the button toggles the menu closed');
+  get('#bsTacticBtn').handlers.click();
+  const locked = get('#bsTacticMenu').innerHTML;
+  assert.equal(get('#bsTacticMenu').hidden, false);
+  assert.equal(/<button data-tactic="fire"[^>]*>/.exec(locked)[0].includes('disabled'), false);
+  assert.match(/<button data-tactic="wall"[^>]*>/.exec(locked)[0], /disabled/);
+  assert.match(locked, /城防工事 Lv\.1/);
+  assert.match(/<button data-tactic="heal"[^>]*>/.exec(locked)[0], /disabled/);
+  assert.match(locked, /經濟發展 Lv\.1 或城防工事 Lv\.2/);
+  assert.match(/<button data-tactic="smoke"[^>]*>/.exec(locked)[0], /disabled/);
+  assert.match(locked, /軍事訓練 Lv\.2/);
+  h.S.research.taipei = { atk: 2, def: 2, eco: 0 };
+  get('#bsTacticBtn').handlers.click();
+  get('#bsTacticBtn').handlers.click();
+  const open = get('#bsTacticMenu').innerHTML;
+  for (const key of ['fire', 'wall', 'heal', 'smoke']) assert.equal(new RegExp(`<button data-tactic="${key}"[^>]*>`).exec(open)[0].includes('disabled'), false, key);
+  get('#bsTacticMenu').handlers.click({ target: { closest: sel => sel === 'button[data-tactic]' ? { dataset: { tactic: 'fire' }, disabled: false } : null } });
+  assert.equal(h.BV.st.tacticUsed.D, 'fire');
+  assert.equal(get('#bsTacticBtn').disabled, true);
+  assert.match(get('#bsTacticBtn').textContent, /鞭炮突擊/);
+  assert.match(get('#bsFloat').textContent, /🧨 鞭炮突擊！/);
+  assert.equal(get('#bsTacticMenu').hidden, true);
+  get('#bsTacticBtn').handlers.click();
+  assert.equal(get('#bsTacticMenu').hidden, true, 'a used tactic cannot be opened again');
   await f.flush(); await defend;
   h.BV.step = 0; h.S.army.yilan = { inf: 6 }; h.S.army.hualien = { inf: 2 }; h.S.current = 'yilan';
   const aiOnly = h.doAttack('yilan', 'hualien', h.S.gen, false, { inf: 5 });
@@ -664,7 +751,7 @@ test('the player moves their own rows with the bottom buttons during a battle', 
   assert.equal(h.BV.st.laneD.join(), 'gen,art', 'cannot touch enemy rows');
   await f.flush(); await battle;
   const r = h.S.lastBattle;
-  assert.ok(Combat.count(r.A) === 0 || Combat.count(r.D) === 0);
+  assert.ok(r.timeout || Combat.count(r.A) === 0 || Combat.count(r.D) === 0);
 });
 
 test('the AI side re-arranges after each round to counter the current line-up', () => {
@@ -676,6 +763,91 @@ test('the AI side re-arranges after each round to counter the current line-up', 
   const fixed = { ...o, adapt: '' }, still = Combat.setup(fixed);
   Combat.step(still, fixed, () => 0.5);
   assert.equal(still.laneD.join(), 'gen,art', 'adapt can be turned off');
+});
+test('the hourglass ends a battle that cannot be finished', () => {
+  assert.equal(Combat.TIME_LIMIT, 12);
+  const tank = { name: '石敢當', icon: '🪨', cost: 1, atk: 1, hp: 1e9, cls: 'inf' };
+  const o = { sent: { inf: 4 }, defenders: { inf: 4 }, units: { inf: tank }, counters: {}, attackMult: 1, defenseMult: 1, defenderAttack: 1 };
+  const r = Combat.resolve(o, () => 0.5);
+  assert.equal(r.rounds.length - 1, Combat.TIME_LIMIT);
+  assert.equal(r.win, false);
+  assert.equal(r.timeout, true);
+  assert.equal(r.retreated, false);
+  assert.ok(Combat.count(r.A) > 0);
+  assert.ok(Combat.count(r.D) > 0);
+  const quick = Combat.resolve(options({ inf: 30 }, { inf: 1 }), () => 0.5);
+  assert.equal(quick.win, true);
+  assert.equal(quick.timeout, false);
+  assert.equal(Combat.estimate(o, 12).chance, 0);
+});
+test('each side can use one tactic per battle', () => {
+  const tough = { inf: { ...units.inf, hp: 1e9 } };
+  const o = { ...options({ inf: 8 }, { inf: 8 }), units: tough };
+  const plain = Combat.setup(o), fired = Combat.setup(o), walled = Combat.setup(o);
+  assert.equal(Combat.useTactic(fired, 'A', 'fire'), true);
+  assert.equal(Combat.useTactic(fired, 'A', 'wall'), false);
+  assert.equal(Combat.useTactic(fired, 'A', 'fire'), false);
+  assert.equal(fired.tacticUsed.A, 'fire');
+  assert.equal(Combat.useTactic(fired, 'D', 'smoke'), true);
+  assert.equal(Combat.useTactic(fired, 'D', 'heal'), false);
+  const fresh = Combat.setup(o);
+  assert.equal(Combat.useTactic(fresh, 'A', 'meteor'), false);
+  assert.equal(fresh.tacticUsed.A, undefined);
+  assert.equal(Combat.useTactic(fresh, 'nope', 'fire'), false);
+  const rnd = () => 0.5;
+  const boosted = Combat.setup(o);
+  assert.equal(Combat.useTactic(boosted, 'A', 'fire'), true);
+  for (let n = 1; n <= 4; n++) {
+    Combat.step(plain, o, rnd);
+    Combat.step(boosted, o, rnd);
+    const ratio = boosted.rounds[n].toD.inf / plain.rounds[n].toD.inf;
+    assert.ok(Math.abs(ratio - (n <= 3 ? 1.5 : 1)) < 1e-9, `fire round ${n}`);
+  }
+  const smoked = Combat.setup(o);
+  assert.equal(Combat.useTactic(smoked, 'A', 'smoke'), true);
+  Combat.step(smoked, o, rnd); Combat.step(smoked, o, rnd);
+  assert.equal(smoked.rounds[1].toA.inf, 0, 'smoke stops the enemy for one round');
+  assert.ok(smoked.rounds[1].toD.inf > 0, 'our side still attacks through the smoke');
+  assert.ok(smoked.rounds[2].toA.inf > 0, 'smoke wears off on the following round');
+  Combat.useTactic(walled, 'D', 'wall');
+  const base = Combat.setup(o);
+  Combat.step(base, o, rnd); Combat.step(walled, o, rnd);
+  assert.ok(Math.abs(walled.rounds[1].toD.inf - base.rounds[1].toD.inf * 0.5) < 1e-9);
+  const healed = Combat.setup(options({ inf: 10, moto: 4 }, { gen: 6 }));
+  healed.A.inf = 0; healed.A.moto = 3;
+  assert.equal(Combat.useTactic(healed, 'A', 'heal'), true);
+  assert.equal(healed.A.inf, 3);
+  assert.equal(healed.A.moto, 4);
+  assert.ok(healed.A.inf <= 10 && healed.A.moto <= 4);
+  assert.equal(Combat.useTactic(healed, 'A', 'heal'), false);
+  assert.equal(healed.A.inf, 3);
+  assert.equal(healed.rounds[0].A.inf, 3, 'the battlefield shows the revived count');
+});
+test('tactic unlocks follow research, and the defender AI spends its one tactic below half strength', () => {
+  const none = { atk: 0, def: 0, eco: 0 };
+  assert.equal(TACTICS.fire.need(none), true);
+  assert.equal(TACTICS.wall.need(none), false);
+  assert.equal(TACTICS.wall.need({ ...none, def: 1 }), true);
+  assert.equal(TACTICS.heal.need(none), false);
+  assert.equal(TACTICS.heal.need({ ...none, eco: 1 }), true);
+  assert.equal(TACTICS.heal.need({ ...none, def: 1 }), false);
+  assert.equal(TACTICS.heal.need({ ...none, def: 2 }), true);
+  assert.equal(TACTICS.smoke.need({ ...none, atk: 1 }), false);
+  assert.equal(TACTICS.smoke.need({ ...none, atk: 2 }), true);
+  assert.equal(TACTICS.fire.name, '鞭炮突擊');
+  for (const key of Object.keys(TACTICS)) assert.equal(Combat.useTactic(Combat.setup(options({ inf: 3 }, { inf: 3 })), 'A', key), true, key);
+  const full = Combat.setup(options({ inf: 6 }, { inf: 10 }));
+  assert.equal(Combat.aiTactic(full, { def: 1 }), null);
+  full.D.inf = 5;
+  assert.equal(Combat.aiTactic(full, { def: 1 }), null, 'exactly half is not below half');
+  full.D.inf = 4;
+  assert.equal(Combat.aiTactic(full, { def: 1 }), 'wall');
+  assert.equal(full.buff.D.take, 3);
+  assert.equal(Combat.aiTactic(full, { def: 0 }), null);
+  const bare = Combat.setup(options({ inf: 6 }, { inf: 10 }));
+  bare.D.inf = 4;
+  assert.equal(Combat.aiTactic(bare, { def: 0 }), 'fire');
+  assert.equal(bare.buff.D.deal, 3);
 });
 test('a row can be sent straight at any enemy row, e.g. the last one', () => {
   const o = { ...options({ moto: 5, inf: 5 }, { inf: 6, gen: 3, art: 4 }), adapt: '' };
@@ -700,4 +872,540 @@ test('in battle the player picks a row, then clicks an enemy row to target it', 
   assert.equal(h.BV.st.aimA.moto, 'art');
   assert.match(get('#bsField').innerHTML, /🎯 第 \d 排/);
   await f.flush(); await battle;
+});
+
+test('transferred troops cannot attack or move again the same turn, and a county keeps one soldier', async () => {
+  const f = fixture(), { h, get } = f;
+  h.S.owner.newtaipei = 'taipei';
+  h.S.army.taipei = { inf: 5 };
+  h.S.army.newtaipei = {};
+  h.S.army.keelung = {};
+  h.S.tr = { from: 'taipei', to: 'newtaipei', amt: { inf: 5 } };
+  h.confirmTransfer();
+  assert.equal(h.S.army.taipei.inf, 1, 'transfer leaves one soldier at home');
+  assert.equal(h.S.army.newtaipei.inf, 4);
+  assert.deepEqual({ ...h.S.moved.newtaipei }, { inf: 4 });
+  assert.equal(h.S.moved.taipei, undefined);
+
+  h.S.tr = { from: 'newtaipei', to: 'taipei', amt: { inf: 4 } };
+  h.confirmTransfer();
+  assert.equal(h.S.army.newtaipei.inf, 4, 'transferred troops cannot move back');
+  assert.equal(h.S.army.taipei.inf, 1);
+
+  const before = JSON.stringify(h.S.army);
+  await h.doAttack('newtaipei', 'keelung', h.S.gen, false, { inf: 3 });
+  assert.equal(h.S.owner.keelung, 'keelung');
+  assert.equal(JSON.stringify(h.S.army), before);
+  assert.equal(h.S.acted.has('newtaipei'), false);
+  h.S.sel = 'newtaipei';
+  h.render();
+  assert.match(get('#info').innerHTML, /已行動 4 人（今日不能再出征或調動）/);
+  assert.match(get('#info').innerHTML, /調入的部隊今天不能出征/);
+
+  h.openAttack('newtaipei', 'keelung');
+  assert.match(get('#attackEstimate').innerHTML, /調入的部隊今天不能出征/);
+  assert.equal(get('#attackConfirm').disabled, true);
+});
+
+test('a transfer only reaches an adjacent own county, and each troop moves once that day', () => {
+  const { h, get } = fixture();
+  h.S.owner.newtaipei = h.S.owner.taoyuan = h.S.owner.keelung = h.S.owner.lienchiang = h.S.owner.kinmen = 'taipei';
+  h.S.army.taipei = { inf: 6 };
+  h.S.army.newtaipei = { inf: 2 };
+  h.S.army.taoyuan = { inf: 1 };
+  h.S.army.keelung = { inf: 3 };
+  h.S.army.lienchiang = { inf: 1 };
+  h.S.army.kinmen = { inf: 1 };
+  h.S.army.yilan = { inf: 4 };
+
+  assert.deepEqual([...h.reachable('taipei')].sort(), ['newtaipei']);
+  assert.equal(h.reachable('keelung').has('lienchiang'), true, 'sea links count as adjacent');
+  assert.equal(h.reachable('keelung').has('kinmen'), false, 'a sea route does not skip the county in between');
+
+  h.S.tr = { from: 'taipei', to: 'taoyuan', amt: { inf: 3 } };
+  h.confirmTransfer();
+  assert.equal(h.S.army.taipei.inf, 6, 'non-adjacent own county is rejected');
+  assert.equal(h.S.army.taoyuan.inf, 1);
+
+  h.S.tr = { from: 'keelung', to: 'kinmen', amt: { inf: 1 } };
+  h.confirmTransfer();
+  assert.equal(h.S.army.keelung.inf, 3);
+  assert.equal(h.S.army.kinmen.inf, 1);
+
+  h.S.tr = { from: 'newtaipei', to: 'yilan', amt: { inf: 1 } };
+  h.confirmTransfer();
+  assert.equal(h.S.army.newtaipei.inf, 2, 'an adjacent county owned by someone else is rejected');
+  assert.equal(h.S.army.yilan.inf, 4);
+  assert.equal(h.S.owner.yilan, 'yilan');
+
+  h.S.tr = { from: 'taipei', to: 'newtaipei', amt: { inf: 4 } };
+  h.confirmTransfer();
+  assert.equal(h.S.army.taipei.inf, 2);
+  assert.equal(h.S.army.newtaipei.inf, 6);
+  assert.deepEqual({ ...h.S.moved.newtaipei }, { inf: 4 });
+
+  get('#trSwap').handlers.click();
+  assert.equal(h.S.tr.from, 'newtaipei');
+  assert.equal(h.S.tr.to, 'taipei');
+  h.changeTransfer('inf', 'max');
+  assert.equal(h.S.tr.amt.inf, 2, 'reverse direction only offers troops that have not moved');
+  h.confirmTransfer();
+  assert.equal(h.S.army.newtaipei.inf, 4);
+  assert.equal(h.S.army.taipei.inf, 4);
+  assert.equal(h.S.moved.newtaipei.inf, 4);
+  assert.equal(h.S.moved.taipei.inf, 2);
+
+  h.S.tr = { from: 'taipei', to: 'taoyuan', amt: { inf: 1 } };
+  get('#trSwap').handlers.click();
+  assert.equal(h.S.tr.from, 'taipei', 'swap refuses a non-adjacent pair');
+  assert.equal(h.S.tr.to, 'taoyuan');
+  assert.equal(h.S.tr.amt.inf, 1);
+
+  h.S.tr = { from: 'keelung', to: 'lienchiang', amt: { inf: 2 } };
+  h.confirmTransfer();
+  assert.equal(h.S.army.keelung.inf, 1);
+  assert.equal(h.S.army.lienchiang.inf, 3);
+  assert.deepEqual({ ...h.S.moved.lienchiang }, { inf: 2 });
+
+  delete h.S.moved.taipei;
+  h.S.army.taipei = { inf: 5 };
+  assert.ok(h.startAim('taipei', [0, 1]));
+  h.aimAt('taoyuan');
+  assert.ok(h.S.aim, 'a far own county is not a transfer target');
+  assert.equal(h.S.army.taoyuan.inf, 1);
+  h.aimAt('newtaipei');
+  assert.equal(h.S.aim, null);
+  assert.equal(h.S.army.taipei.inf, 3);
+  assert.equal(h.S.army.newtaipei.inf, 6);
+});
+
+test('only fresh troops can be selected, and the attack dialog will not deploy moved ones', () => {
+  const { h, get } = fixture();
+  h.S.owner.newtaipei = 'taipei';
+  h.S.army.taipei = { inf: 4 };
+  h.S.army.newtaipei = { inf: 24 };
+  h.S.moved = { taipei: { inf: 2 } };
+  h.S.tr = { from: 'taipei', to: 'newtaipei', amt: {} };
+  h.changeTransfer('inf', 'max');
+  assert.equal(h.S.tr.amt.inf, 1, 'destination room and fresh count both cap the transfer');
+
+  h.S.army.newtaipei = {};
+  h.S.moved = {};
+  h.S.army.taipei = { inf: 5 };
+  h.S.tr = { from: 'taipei', to: 'newtaipei', amt: {} };
+  h.changeTransfer('inf', 'max');
+  assert.equal(h.S.tr.amt.inf, 4);
+
+  h.S.army.taipei = { inf: 4 };
+  h.S.moved = { taipei: { inf: 3 } };
+  assert.deepEqual({ ...h.pickedArmy('taipei', [1, 2, 3]) }, {});
+  assert.deepEqual({ ...h.pickedArmy('taipei', [0, 1]) }, { inf: 1 });
+  assert.ok(h.startAim('taipei', [1, 2, 3]));
+  h.aimAt('newtaipei');
+  assert.equal(Combat.count(h.S.army.newtaipei), 0);
+  assert.equal(h.S.army.taipei.inf, 4);
+
+  h.S.owner.newtaipei = 'newtaipei';
+  h.S.army.newtaipei = { inf: 4 };
+  h.S.army.taipei = { inf: 4 };
+  h.S.moved = { taipei: { inf: 2 } };
+  assert.ok(h.startAim('taipei', [0, 1, 2, 3]));
+  h.aimAt('newtaipei');
+  assert.equal(get('#attackDialog').hidden, false);
+  assert.deepEqual({ ...h.S.attack.sent }, { inf: 1 });
+  assert.match(get('#attackRows').innerHTML, /可出征 2/);
+});
+
+test('an inactive player cannot transfer, and new recruits stay fresh after losses clamp moved', () => {
+  const { h } = fixture();
+  h.S.owner.newtaipei = 'taipei';
+  h.S.army.taipei = { inf: 4 };
+  h.S.army.newtaipei = {};
+  h.S.current = null;
+  h.S.tr = { from: 'taipei', to: 'newtaipei', amt: { inf: 3 } };
+  h.confirmTransfer();
+  assert.equal(h.S.army.taipei.inf, 4);
+  assert.equal(Combat.count(h.S.army.newtaipei), 0);
+
+  h.S.current = 'taipei';
+  h.S.owner.newtaipei = 'newtaipei';
+  h.S.army.newtaipei = { inf: 10 };
+  h.S.moved = { newtaipei: { inf: 8, moto: 1 } };
+  assert.ok(h.useSkill('taipei', 0));
+  assert.equal(h.S.army.newtaipei.inf, 7);
+  assert.equal(h.S.moved.newtaipei.inf, 7);
+  assert.equal(h.S.moved.newtaipei.moto, undefined);
+
+  h.S.army.taipei = { inf: 4 };
+  h.S.moved.taipei = { inf: 4 };
+  h.S.money.taipei = 100;
+  h.S.sel = 'taipei';
+  h.recruit('inf');
+  assert.equal(h.S.army.taipei.inf, 5);
+  assert.equal(h.S.moved.taipei.inf, 4);
+  assert.deepEqual({ ...h.freshArmy('taipei') }, { inf: 1 });
+});
+
+test('capture and retreat mark the soldiers who already fought', async () => {
+  const f = fixture(), { h, get } = f;
+  h.S.speed = 99;
+  h.S.army.taipei = { inf: 5 };
+  h.S.army.newtaipei = {};
+  h.S.moved = { newtaipei: { moto: 2 } };
+  const win = h.doAttack('taipei', 'newtaipei', h.S.gen, false, { inf: 3 });
+  await f.flush(); await win;
+  assert.equal(h.S.owner.newtaipei, 'taipei');
+  assert.deepEqual({ ...h.S.moved.newtaipei }, { inf: 3 });
+  assert.equal(h.S.moved.newtaipei.moto, undefined);
+  assert.equal(h.S.moved.taipei, undefined);
+  assert.deepEqual({ ...h.freshArmy('taipei') }, { inf: 2 });
+
+  h.S.speed = 1;
+  h.S.acted.clear();
+  h.S.army.taipei = { inf: 21 };
+  h.S.army.newtaipei = { gen: 20 };
+  h.S.owner.newtaipei = 'newtaipei';
+  const battle = h.doAttack('taipei', 'newtaipei', h.S.gen, false, { inf: 20 });
+  await untilStep(f, 1);
+  get('#bsRetreat').handlers.click();
+  await f.flush(); await battle;
+  const back = Combat.count(h.S.lastBattle.A);
+  assert.ok(h.S.lastBattle.retreated);
+  assert.ok(back > 0);
+  assert.equal(h.S.moved.taipei.inf, back);
+  assert.deepEqual({ ...h.freshArmy('taipei') }, { inf: 1 });
+  assert.equal(h.S.owner.newtaipei, 'newtaipei');
+});
+
+test('moved troops reset on the next turn and round-trip through old and new saves', async () => {
+  const f = fixture(), { h } = f;
+  h.S.army.taipei = { inf: 4, moto: 1 };
+  h.S.army.keelung = { art: 2 };
+  h.S.moved = { taipei: { inf: 2 }, keelung: { art: 1 } };
+  const bag = moved => JSON.parse(JSON.stringify(moved));
+  const loaded = GameSaves.decode(GameSaves.encode(h.S), h.saveRules);
+  assert.deepEqual(bag(loaded.data.moved), { taipei: { inf: 2 }, keelung: { art: 1 } });
+  assert.ok(h.saveCheckpoint('manual'));
+  h.S.moved = {};
+  h.loadCheckpoint('manual');
+  assert.deepEqual(bag(h.S.moved), { taipei: { inf: 2 }, keelung: { art: 1 } });
+
+  const old = JSON.parse(GameSaves.encode(h.S));
+  delete old.data.moved;
+  assert.deepEqual(GameSaves.decode(JSON.stringify(old), h.saveRules).data.moved, {});
+  for (const corrupt of [
+    s => { s.data.moved = { taipei: { inf: 99 } }; },
+    s => { s.data.moved = { taipei: { nope: 1 } }; },
+    s => { s.data.moved = { taipei: { inf: 9 } }; },
+    s => { s.data.moved = { nope: { inf: 1 } }; },
+    s => { s.data.moved = null; },
+  ]) {
+    const bad = structuredClone(JSON.parse(GameSaves.encode(h.S)));
+    corrupt(bad);
+    assert.throws(() => GameSaves.decode(JSON.stringify(bad), h.saveRules));
+  }
+
+  h.S.speed = 99;
+  h.S.moved = { taipei: { inf: 2 } };
+  h.endPlayerTurn();
+  for (let i = 0; i < 40 && h.S.current !== 'taipei'; i++) await f.flush();
+  assert.equal(h.S.current, 'taipei');
+  assert.equal(h.S.day, 2);
+  assert.deepEqual({ ...h.S.moved }, {});
+});
+
+test('old saves treat the player as already started; an explicit flag round-trips', () => {
+  const { h } = fixture();
+  h.S.playerStarted = false;
+  const saved = JSON.parse(GameSaves.encode(h.S));
+  assert.equal(GameSaves.decode(JSON.stringify(saved), h.saveRules).data.playerStarted, false);
+  delete saved.data.playerStarted;
+  assert.equal(GameSaves.decode(JSON.stringify(saved), h.saveRules).data.playerStarted, true);
+});
+
+test('hard difficulty tops an island opening army up to 8 and announces protection', () => {
+  const f = fixture(), { h, get } = f;
+  h.S.diffKey = 'easy';
+  h.initState('play', 'penghu');
+  assert.equal(Combat.count(h.S.army.penghu), 4, 'easy keeps the island army');
+  h.S.diffKey = 'hard';
+  h.newGame('play', 'penghu');
+  assert.ok(Combat.count(h.S.army.penghu) >= 8);
+  assert.equal(h.S.army.penghu.art, 1, 'top-up adds infantry and keeps the artillery');
+  assert.ok(get('#log').children.some(c => c.innerHTML.includes('開局保護')));
+  ++h.S.gen;
+});
+
+test('before the player acts, a hard AI cannot capture or strike their county', async () => {
+  const f = fixture(), { h, context } = f;
+  h.S.speed = 99;
+  h.S.diff = vm.runInContext('DIFFICULTY.hard', context);
+  h.S.player = 'penghu';
+  h.S.playerStarted = false;
+  h.S.owner.penghu = 'penghu';
+  h.S.owner.changhua = h.S.owner.chiayicounty = 'yunlin';
+  h.S.army.penghu = { inf: 1 };
+  h.S.army.yunlin = { elite: 25 };
+  h.S.money.yunlin = 0;
+  h.S.slots.yunlin = ['yunlin', 'c_leak'];
+  h.S.skillReady = {};
+  h.S.current = 'yunlin';
+  h.S.acted.clear();
+  const blocked = h.aiTurn('yunlin', h.S.gen);
+  await f.flush();
+  await blocked;
+  assert.equal(h.S.owner.penghu, 'penghu');
+  assert.equal(h.S.army.penghu.inf, 1, 'strike skills also spare the player');
+  h.S.playerStarted = true;
+  h.S.acted.clear();
+  h.S.money.yunlin = 0;
+  h.S.skillReady = {};
+  const open = h.aiTurn('yunlin', h.S.gen);
+  await f.flush();
+  await open;
+  assert.equal(h.S.owner.penghu, 'yunlin');
+});
+
+test('a hard penghu opening survives every AI turn before the player acts', async () => {
+  const f = fixture(), { h, context } = f;
+  const hard = vm.runInContext('DIFFICULTY.hard', context);
+  for (let n = 0; n < 20; n++) {
+    ++h.S.gen;
+    h.S.diffKey = 'hard';
+    h.S.speed = 99;
+    h.initState('play', 'penghu');
+    h.S.diff = hard;
+    h.S.gameDiffKey = 'hard';
+    h.S.menuOpen = false;
+    assert.equal(h.S.playerStarted, false);
+    assert.ok(Combat.count(h.S.army.penghu) >= 8);
+    const troops = Combat.count(h.S.army.penghu);
+    for (const id of h.S.order) {
+      if (id === 'penghu') break;
+      if (!Object.values(h.S.owner).includes(id)) continue;
+      const turn = h.aiTurn(id, h.S.gen);
+      await f.flush();
+      await turn;
+    }
+    assert.equal(h.S.owner.penghu, 'penghu', `iteration ${n}`);
+    assert.equal(Combat.count(h.S.army.penghu), troops, `iteration ${n} army was hit before the first turn`);
+    h.S.turnIdx = h.S.order.indexOf('penghu');
+    await h.runLoop(h.S.gen);
+    assert.equal(h.S.current, 'penghu');
+    assert.equal(h.S.playerStarted, true);
+    assert.ok(Object.values(h.S.owner).includes('penghu'));
+  }
+});
+
+test('an AI faction uses at most two skills per turn and skips defense during peace', () => {
+  const f = fixture(), { h, context } = f;
+  h.S.diff = vm.runInContext('DIFFICULTY.hard', context);
+  h.S.day = 3;
+  h.S.playerStarted = true;
+  h.S.skillReady = {};
+  for (const id of Object.keys(h.S.owner)) {
+    h.S.owner[id] = 'kaohsiung';
+    h.S.slots[id] = [id, 'c_build'];
+    h.S.army[id] = { inf: 4 };
+    h.S.money.kaohsiung = 0;
+  }
+  h.aiUseSkills('kaohsiung');
+  const used = Object.keys(h.S.skillReady);
+  assert.ok(used.length > 0 && used.length <= 2, `used ${used.length}: ${used.join(',')}`);
+  assert.ok(used.every(k => k.startsWith('kaohsiung:')), 'home county skills come first');
+
+  h.S.diff = vm.runInContext('DIFFICULTY.easy', context);
+  h.S.day = 1;
+  h.S.skillReady = {};
+  h.S.buff = {};
+  for (const id of Object.keys(h.S.owner)) {
+    h.S.owner[id] = 'newtaipei';
+    h.S.slots[id] = [id, 'c_guard'];
+    h.S.skillReady[`${id}:0`] = 99;
+    h.S.skillReady[`${id}:1`] = 99;
+    h.S.army[id] = { inf: 1 };
+  }
+  h.S.owner.taichung = 'taichung';
+  h.S.army.taichung = { elite: 25 };
+  for (const id of ['miaoli', 'hsinchucounty']) {
+    delete h.S.skillReady[`${id}:0`];
+    delete h.S.skillReady[`${id}:1`];
+  }
+  h.aiUseSkills('newtaipei');
+  assert.equal(h.S.buff.miaoli, undefined);
+  assert.equal(h.S.skillReady['miaoli:0'], undefined);
+  assert.equal(h.S.skillReady['miaoli:1'], undefined);
+
+  h.S.diff = vm.runInContext('DIFFICULTY.hard', context);
+  h.S.buff = {};
+  h.aiUseSkills('newtaipei');
+  assert.ok(h.S.buff.miaoli?.def, 'defense is allowed once peace is over');
+});
+
+test('ending the turn asks once, then ends on the second request', () => {
+  const { h, get } = fixture();
+  h.render();
+  const btn = get('#endTurn');
+  assert.equal(btn.textContent, '結束回合 ▶');
+  h.requestEndTurn();
+  assert.equal(h.S.current, 'taipei');
+  assert.equal(btn.textContent, '還有 1 個縣市可出征，確定結束？');
+  assert.equal(btn.classList.contains('confirming'), true);
+  h.requestEndTurn();
+  assert.notEqual(h.S.current, 'taipei');
+  assert.equal(btn.classList.contains('confirming'), false);
+});
+
+test('end-turn confirmation reverts without ending, and a direct end still works', async () => {
+  const f = fixture(), { h, get } = f;
+  h.render();
+  const btn = get('#endTurn');
+  h.S.acted.add('taipei');
+  h.requestEndTurn();
+  assert.equal(h.S.current, 'taipei');
+  assert.equal(btn.textContent, '確定結束回合？');
+  await f.flush();
+  assert.equal(h.S.current, 'taipei');
+  assert.equal(btn.textContent, '結束回合 ▶');
+  assert.equal(btn.classList.contains('confirming'), false);
+
+  h.S.acted.clear();
+  h.S.owner.newtaipei = 'taipei';
+  h.requestEndTurn();
+  assert.equal(btn.textContent, '還有 2 個縣市可出征，確定結束？');
+  h.S.sel = 'taipei';
+  h.recruit('inf');
+  assert.equal(h.S.current, 'taipei');
+  assert.equal(btn.textContent, '結束回合 ▶');
+  h.requestEndTurn();
+  assert.equal(h.S.current, 'taipei');
+  h.openAttack('taipei', 'newtaipei');
+  assert.equal(btn.textContent, '結束回合 ▶');
+  assert.equal(btn.classList.contains('confirming'), false);
+  assert.equal(get('#attackDialog').hidden, false);
+
+  h.requestEndTurn();
+  assert.equal(h.S.current, 'taipei');
+  h.endPlayerTurn();
+  assert.notEqual(h.S.current, 'taipei');
+});
+
+test('Enter on a focused button does not skip the end-turn confirmation', () => {
+  const f = fixture(), { h, get } = f;
+  get('#modal').hidden = true;
+  h.render();
+  const btn = get('#endTurn');
+  const press = (key, target) => f.listeners.keydown.at(-1)({ key, preventDefault() {}, target });
+  // One Enter on a focused button: keydown, then the browser's native click.
+  press('Enter', { tagName: 'BUTTON' });
+  btn.handlers.click();
+  assert.equal(h.S.current, 'taipei');
+  assert.equal(btn.classList.contains('confirming'), true);
+  press('e', { tagName: 'BUTTON' });
+  assert.notEqual(h.S.current, 'taipei');
+});
+
+test('mute shortcut stays quiet without Sfx and ignores text fields', () => {
+  const f = fixture();
+  const press = (key, target) => f.listeners.keydown.at(-1)({ key, repeat: false, preventDefault() {}, target: target || { tagName: 'DIV' } });
+  assert.equal(f.get('#sfxBtn').textContent, '🔇');
+  assert.equal(f.get('#sfxBtn').title, '音效：關');
+  assert.doesNotThrow(() => press('m'));
+  assert.doesNotThrow(() => press('M', { tagName: 'INPUT' }));
+  assert.doesNotThrow(() => press('m', { tagName: 'SELECT' }));
+  f.get('#sfxBtn').handlers.click();
+  assert.equal(f.get('#sfxBtn').textContent, '🔇');
+});
+
+test('synthesized sfx stays silent without AudioContext, defaults to muted, and persists the toggle', () => {
+  const html = fs.readFileSync('index.html', 'utf8');
+  const readme = fs.readFileSync('README.md', 'utf8');
+  assert.ok(html.indexOf('js/sfx.js?v=20261023c') !== -1 && html.indexOf('js/sfx.js?v=20261023c') < html.indexOf('js/game.js'), 'sfx.js loads before game.js');
+  assert.match(html, /id="sfxBtn"[^>]*aria-label="音效：關"/);
+  assert.match(html, /id="sfxBtn"[^>]*title="音效：關"/);
+  assert.match(readme, /🔇／🔊/);
+  assert.match(readme, /預設靜音/);
+
+  function load(extra, storage = new Map()) {
+    const context = vm.createContext({
+      localStorage: {
+        getItem: k => storage.has(k) ? storage.get(k) : null,
+        setItem(k, v) { if (storage.get('deny')) throw Error('denied'); storage.set(k, String(v)); },
+      },
+      ...extra,
+    });
+    vm.runInContext(fs.readFileSync('js/sfx.js', 'utf8'), context);
+    return context.Sfx;
+  }
+
+  const storage = new Map();
+  const Sfx = load({}, storage);
+  assert.equal(typeof Sfx.play, 'function');
+  assert.equal(Sfx.muted(), true);
+  assert.doesNotThrow(() => Sfx.play('attack'));
+  assert.doesNotThrow(() => Sfx.play('not-a-sound'));
+  assert.equal(storage.has('tcw-muted'), false, 'reading the default does not write storage');
+  Sfx.toggle();
+  assert.equal(Sfx.muted(), false);
+  assert.equal(storage.get('tcw-muted'), '0');
+  assert.doesNotThrow(() => {
+    for (const name of ['click', 'attack', 'hit', 'capture', 'hold', 'news', 'tactic', 'end']) Sfx.play(name);
+  });
+  Sfx.setMuted(true);
+  assert.equal(Sfx.muted(), true);
+  assert.equal(storage.get('tcw-muted'), '1');
+  Sfx.toggle();
+  assert.equal(Sfx.muted(), false);
+  storage.set('deny', '1');
+  assert.doesNotThrow(() => Sfx.toggle());
+  assert.equal(Sfx.muted(), true, 'mute still flips when storage throws');
+
+  const storedOn = new Map([['tcw-muted', '0']]);
+  let constructed = 0;
+  const unmuted = load({ AudioContext: class { constructor() { constructed++; throw Error('blocked'); } } }, storedOn);
+  assert.equal(unmuted.muted(), false);
+  assert.doesNotThrow(() => unmuted.play('click'));
+  assert.equal(constructed, 1);
+
+  const clock = { t: 1000 };
+  let osc = 0, master = null, contexts = 0;
+  class FakeAudio {
+    constructor() {
+      contexts++;
+      this.sampleRate = 8000;
+      this.currentTime = 0;
+      this.state = 'running';
+      this.destination = {};
+    }
+    createGain() {
+      const gain = { value: 1, setValueAtTime() {}, exponentialRampToValueAtTime() {} };
+      const node = { gain, connect() {} };
+      if (!this.master) { this.master = node; master = node; }
+      return node;
+    }
+    createOscillator() {
+      osc++;
+      return { type: '', frequency: { setValueAtTime() {}, exponentialRampToValueAtTime() {} }, connect() {}, start() {}, stop() {} };
+    }
+    createBuffer(_ch, len) { return { getChannelData: () => new Float32Array(len) }; }
+    createBufferSource() { return { connect() {}, start() {}, stop() {} }; }
+    createBiquadFilter() { return { type: '', frequency: { setValueAtTime() {} }, connect() {} }; }
+  }
+  const live = load({ AudioContext: FakeAudio, performance: { now: () => clock.t } }, new Map([['tcw-muted', '0']]));
+  assert.equal(live.muted(), false);
+  live.play('attack');
+  assert.equal(contexts, 1);
+  assert.equal(master.gain.value, 0.25);
+  const first = osc;
+  assert.ok(first >= 1);
+  live.play('attack');
+  assert.equal(osc, first, 'same sound inside 60 ms is ignored');
+  clock.t += 60;
+  live.play('attack');
+  assert.ok(osc > first);
+  live.setMuted(true);
+  const gated = osc;
+  live.play('click');
+  assert.equal(osc, gated, 'muted play stays silent');
+  assert.equal(live.muted(), true);
 });
