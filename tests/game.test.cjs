@@ -1468,7 +1468,7 @@ test('a player attack battle keeps focus on the battle screen', async () => {
   assert.notEqual(f.focused, get('#bsSkip'));
   await f.flush(); await attack;
 });
-test('space pauses a running attack even if a button is focused; S skips', async () => {
+test('space pauses a running attack when no button is focused; a focused button keeps native Space; S skips', async () => {
   const f = fixture(), { h, get } = f;
   h.S.army.taipei = { inf: 10 }; h.S.army.newtaipei = { inf: 5 };
   const attack = h.doAttack('taipei', 'newtaipei', h.S.gen, false, { inf: 4 });
@@ -1482,35 +1482,27 @@ test('space pauses a running attack even if a button is focused; S skips', async
       key,
       repeat: !!extra.repeat,
       preventDefault() { prevented = true; },
-      target: extra.target || { tagName: 'BUTTON' },
+      target: extra.target || { tagName: 'DIV' },
     });
     return prevented;
   };
-  const up = target => {
-    let prevented = false;
-    f.listeners.keyup.at(-1)({ key: ' ', preventDefault() { prevented = true; }, target });
-    return prevented;
-  };
-  assert.equal(down(' ', { repeat: true }), true);
+  assert.equal(down(' ', { repeat: true, target: { tagName: 'DIV' } }), true);
   assert.equal(h.BV.paused, false, 'auto-repeat does not toggle pause');
   assert.equal(h.BV.skip, false);
-  assert.equal(down(' '), true);
+  assert.equal(down(' ', { target: { tagName: 'DIV' } }), true);
   assert.equal(h.BV.paused, true);
   assert.equal(h.BV.skip, false);
-  assert.equal(down(' '), true);
+  assert.equal(down(' ', { target: { tagName: 'DIV' } }), true);
   assert.equal(h.BV.paused, false);
   assert.equal(h.BV.skip, false);
-  assert.equal(down(' ', { repeat: true }), true);
+  assert.equal(down(' ', { repeat: true, target: { tagName: 'DIV' } }), true);
   assert.equal(h.BV.paused, false, 'auto-repeat does not resume either');
-  assert.equal(up({ tagName: 'BUTTON' }), true);
-  assert.equal(h.BV.paused, false, 'keyup only cancels the native click');
-  const menuBtn = { tagName: 'BUTTON', closest: sel => sel === '#bsTacticMenu' ? {} : null };
-  assert.equal(up(menuBtn), false);
-  get('#bsTacticMenu').hidden = false;
-  assert.equal(down(' ', { target: menuBtn }), false);
+  assert.equal(down(' ', { target: { tagName: 'BUTTON' } }), false);
   assert.equal(h.BV.paused, false);
   assert.equal(h.BV.skip, false);
-  get('#bsTacticMenu').hidden = true;
+  get('#bsSkip').handlers.click();
+  assert.equal(h.BV.skip, true);
+  h.BV.skip = false;
   assert.equal(down('s'), true);
   assert.equal(h.BV.skip, true);
   h.BV.skip = false;
