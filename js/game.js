@@ -1375,6 +1375,7 @@
     $('#bsHold').hidden = true;
     renderTacticBtn();
     $('#bsDone').hidden = false;
+    keepBattleFocus($('#bsDone'));
     $('#bsDone').focus();
     Object.assign(BV, { skip: false, retreat: false });
     await battleSleep(2400, gen);
@@ -1389,6 +1390,8 @@
     $('#bsPause').textContent = BV.paused ? '▶' : '⏸';
     $('#bsPause').setAttribute('aria-label', BV.paused ? '繼續戰鬥' : '暫停戰鬥');
     $('#bsFast').textContent = `⏩ ${BV.fast}x`;
+    const done = $('#bsDone');
+    keepBattleFocus(done && !done.hidden ? done : $('#battleScreen'));
   }
   const tacticUnlocked = (key, research) => !!TACTICS[key]?.need?.(research || { atk: 0, def: 0, eco: 0 });
   function renderTacticBtn() {
@@ -1415,10 +1418,15 @@
   function toggleTacticMenu() {
     if (!BV.open || !BV.side || !BV.st || BV.st.done || BV.st.tacticUsed?.[BV.side]) return;
     const menu = $('#bsTacticMenu');
+    const closing = !menu.hidden;
     menu.hidden = !menu.hidden;
     if (!menu.hidden) fillTacticMenu();
     $('#bsTacticBtn').setAttribute('aria-expanded', menu.hidden ? 'false' : 'true');
     endDefenceHold();
+    if (closing) {
+      const btn = $('#bsTacticBtn');
+      keepBattleFocus(btn.disabled ? $('#battleScreen') : btn);
+    }
   }
   function shoutTactic(t) {
     const el = $('#bsFloat');
@@ -1438,6 +1446,7 @@
     renderTacticBtn();
     drawBattle(BV.step, null, true);
     endDefenceHold();
+    keepBattleFocus($('#battleScreen'));
     return true;
   }
   // 換排：把選取的我方那一排往前（靠城牆，delta = -1）或往後移，和相鄰那排對調
@@ -1473,8 +1482,8 @@
   $('#bsDone').addEventListener('click', skipBattle);
   $('#bsPause').addEventListener('click', toggleBattlePause);
   $('#bsFast').addEventListener('click', () => { BV.fast = BV.fast >= 4 ? 1 : BV.fast * 2; renderBattleCtrls(); });
-  $('#bsFwd').addEventListener('click', () => moveRow(-1));
-  $('#bsBack').addEventListener('click', () => moveRow(1));
+  $('#bsFwd').addEventListener('click', () => { moveRow(-1); focusAfterRowMove($('#bsFwd')); });
+  $('#bsBack').addEventListener('click', () => { moveRow(1); focusAfterRowMove($('#bsBack')); });
   $('#bsField').addEventListener('click', e => {
     const lane = e.target.closest?.('[data-lane]'), foe = e.target.closest?.('[data-foe]');
     if (lane) selectRow(Number(lane.dataset.lane));
@@ -1485,6 +1494,7 @@
     BV.retreat = true;
     $('#bsRetreat').disabled = true;
     BV.wake?.();
+    keepBattleFocus($('#battleScreen'));
   });
   $('#bsTacticBtn').addEventListener('click', () => { if (!$('#bsTacticBtn').disabled) toggleTacticMenu(); });
   $('#bsTacticMenu').addEventListener('click', e => {
@@ -2041,8 +2051,62 @@
   });
   $('#info').addEventListener('change', e => { if (e.target.id === 'halfChk') { cancelEndTurnConfirm(); S.sendHalf = e.target.checked; renderInfo(); } });
   $('#research').addEventListener('click', e => { const b = e.target.closest('button[data-k]'); if (b) doResearch(b.dataset.k); });
+  // 焦點在清單兩端以外時回傳 null，交給瀏覽器原生 Tab。
+  function trapFocusTarget(list, active, shift) {
+    if (!list?.length) return null;
+    const i = list.indexOf(active);
+    if (i < 0) return shift ? list[list.length - 1] : list[0];
+    if (shift) return i === 0 ? list[list.length - 1] : null;
+    return i === list.length - 1 ? list[0] : null;
+  }
+  function insideHidden(el, root) {
+    let node = el;
+    while (node && node !== root) {
+      if (node.hidden) return true;
+      node = node.parentElement;
+    }
+    return false;
+  }
+  function battleFocusables() {
+    const root = $('#battleScreen');
+    const nodes = typeof root?.querySelectorAll === 'function' ? root.querySelectorAll('button') : [];
+    return [...nodes].filter(btn => btn && !btn.disabled && !insideHidden(btn, root));
+  }
+  function battleFocusUnusable(el) {
+    if (!el || el === document.body) return true;
+    if (el.disabled) return true;
+    const screen = $('#battleScreen');
+    if (!screen) return true;
+    if (insideHidden(el, screen)) return true;
+    if (el === screen) return false;
+    if (typeof screen.contains === 'function') return !screen.contains(el);
+    return false;
+  }
+  function canTakeBattleFocus(el) {
+    if (!el || el.disabled || el.hidden) return false;
+    const screen = $('#battleScreen');
+    if (el === screen) return true;
+    if (insideHidden(el, screen)) return false;
+    if (typeof screen?.contains === 'function' && !screen.contains(el)) return false;
+    return true;
+  }
+  // 只在目前焦點已不可用時移動，避免搶走還能操作的按鈕。
+  function keepBattleFocus(preferred) {
+    if (!BV.open) return;
+    if (!battleFocusUnusable(document.activeElement)) return;
+    const screen = $('#battleScreen');
+    const target = canTakeBattleFocus(preferred) ? preferred : screen;
+    target?.focus?.();
+  }
+  function focusAfterRowMove(used) {
+    if (!used?.disabled) return;
+    const other = used === $('#bsFwd') ? $('#bsBack') : $('#bsFwd');
+    keepBattleFocus(canTakeBattleFocus(other) ? other : $('#battleScreen'));
+  }
+  // Shift 不算在內：大寫 S／T／M 與 Shift+Tab 仍要有效。
+  const hasModifier = e => !!(e.ctrlKey || e.metaKey || e.altKey);
   document.addEventListener('keydown', e => {
-    if ((e.key === 'm' || e.key === 'M') && !e.repeat) {
+    if ((e.key === 'm' || e.key === 'M') && !e.repeat && !hasModifier(e)) {
       const tag = e.target?.tagName;
       const typing = tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || e.target?.isContentEditable;
       const startScreen = !$('#modal').hidden && !$('#startView').hidden;
@@ -2051,31 +2115,54 @@
       // 開始畫面可切音效；出征／調兵／組建／技能視窗與結束畫面不搶 M
       if (!typing && !blockingDialog) { e.preventDefault(); toggleSfx(); }
     }
-    if (e.key === 'Tab' && !$('#attackDialog').hidden) {
+    if (e.key === 'Tab' && !hasModifier(e) && !$('#attackDialog').hidden) {
       const controls = [...$('#attackDialog').querySelectorAll('button:not(:disabled)')];
       const first = controls[0], last = controls[controls.length - 1];
       if (e.shiftKey && document.activeElement === first) { e.preventDefault(); last.focus(); }
       else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first.focus(); }
     }
-    if (e.key === 'Escape' && !$('#attackDialog').hidden) { $('#attackCancel').click(); return; }
+    if (e.key === 'Escape' && !$('#attackDialog').hidden) {
+      if (hasModifier(e)) return;
+      $('#attackCancel').click();
+      return;
+    }
     if (e.key === 'Enter' && !$('#attackDialog').hidden) {
       // 焦點在任何按鈕上時交給瀏覽器原生 click，避免 ±／預設鍵被當成確認出征。
       if (e.target?.tagName === 'BUTTON') return;
+      if (hasModifier(e)) return;
       e.preventDefault();
       if (!$('#attackConfirm').disabled) $('#attackConfirm').click();
       return;
     }
     if (BV.open) {
-      const mod = e.ctrlKey || e.metaKey || e.altKey;
-      // 按住 Ctrl、Cmd 或 Alt 時，Esc、S、空白留給瀏覽器快捷鍵。
-      if (e.key === 'Escape' && !mod) skipBattle();
-      if ((e.key === 's' || e.key === 'S') && !e.repeat && !mod) { e.preventDefault(); skipBattle(); }
-      if ((e.key === 't' || e.key === 'T') && !e.repeat) { e.preventDefault(); toggleTacticMenu(); }
-      if (e.key === 'ArrowLeft' || e.key === 'ArrowRight') { e.preventDefault(); moveRow(e.key === 'ArrowRight' ? -1 : 1); } // 我方在左：→ 往前
+      if (e.key === 'Tab') {
+        // Ctrl／Cmd／Alt+Tab 留給瀏覽器；Shift+Tab 仍在戰鬥畫面內循環。
+        if (!hasModifier(e)) {
+          const list = battleFocusables();
+          if (!list.length) {
+            e.preventDefault();
+            $('#battleScreen').focus();
+          } else {
+            const next = trapFocusTarget(list, document.activeElement, !!e.shiftKey);
+            if (next) { e.preventDefault(); next.focus(); }
+          }
+        }
+        return;
+      }
+      // 按住 Ctrl、Cmd 或 Alt 時，戰鬥快捷鍵留給瀏覽器。
+      if (e.key === 'Escape' && !hasModifier(e)) skipBattle();
+      if ((e.key === 's' || e.key === 'S') && !e.repeat && !hasModifier(e)) { e.preventDefault(); skipBattle(); }
+      if ((e.key === 't' || e.key === 'T') && !e.repeat && !hasModifier(e)) { e.preventDefault(); toggleTacticMenu(); }
+      if ((e.key === 'ArrowLeft' || e.key === 'ArrowRight') && !hasModifier(e)) {
+        e.preventDefault();
+        const forward = e.key === 'ArrowRight'; // 我方在左：→ 往前
+        moveRow(forward ? -1 : 1);
+        focusAfterRowMove($(forward ? '#bsFwd' : '#bsBack'));
+      }
       if (e.key === ' ') {
         // 焦點在按鈕上時，空白鍵交給瀏覽器原生按下。
         if (e.target?.tagName === 'BUTTON') return;
-        if (!mod) {
+        if (!hasModifier(e)) {
           e.preventDefault();
           if (!e.repeat) toggleBattlePause();
         }
@@ -2083,6 +2170,7 @@
       return;
     }
     if (!$('#attackDialog').hidden || !$('#modal').hidden || !$('#designer').hidden || !$('#transfer').hidden || !$('#skillPicker').hidden || e.target.tagName === 'INPUT') return;
+    if (hasModifier(e)) return;
     // Enter 在按鈕上會再觸發一次 click；交給按鈕，避免確認被同一下按鍵跳過。e 仍全域有效。
     if (e.key === 'e' || (e.key === 'Enter' && e.target.tagName !== 'BUTTON')) requestEndTurn();
     if (e.key === 'Escape') { S.sel = null; S.transferMode = false; clearAim(); render(); }

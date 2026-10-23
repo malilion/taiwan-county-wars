@@ -7,9 +7,13 @@ const GameSaves = require('../js/saves.js');
 
 function fixture() {
   const focus = { el: null, doc: null };
+  const buttonIds = new Set([...fs.readFileSync('index.html', 'utf8').matchAll(/<button\b[^>]*\bid="([^"]+)"/g)].map(m => m[1]));
   class Element {
-    constructor() {
+    constructor(id) {
       this.children = []; this.hidden = true; this.style = {}; this.dataset = {}; this.handlers = {};
+      this.parentElement = null;
+      this.id = typeof id === 'string' ? id.replace(/^#/, '') : '';
+      this.tagName = buttonIds.has(this.id) ? 'BUTTON' : 'DIV';
       const classes = new Set();
       this.classList = {
         add: (...names) => { for (const name of names) classes.add(name); },
@@ -22,23 +26,66 @@ function fixture() {
         contains: name => classes.has(name),
       };
     }
-    set innerHTML(value) { this.html = value; this.children = []; }
+    set innerHTML(value) {
+      for (const child of this.children) { child.parent = null; child.parentElement = null; }
+      this.html = value; this.children = [];
+    }
     get innerHTML() { return this.html || ''; }
     get textContent() { return this.text ?? this.innerHTML.replace(/<[^>]*>/g, ''); }
     set textContent(v) { this.text = String(v); }
     get lastChild() { return this.children.at(-1); }
-    appendChild(el) { this.children.push(el); el.parent = this; return el; }
-    prepend(el) { this.children.unshift(el); el.parent = this; }
-    remove() { if (this.parent) this.parent.children = this.parent.children.filter(e => e !== this); }
-    replaceChildren() { this.children = []; }
+    appendChild(el) {
+      if (el.parentElement && el.parentElement !== this) el.parentElement.children = el.parentElement.children.filter(c => c !== el);
+      this.children.push(el); el.parent = this; el.parentElement = this; return el;
+    }
+    prepend(el) {
+      if (el.parentElement && el.parentElement !== this) el.parentElement.children = el.parentElement.children.filter(c => c !== el);
+      this.children.unshift(el); el.parent = this; el.parentElement = this;
+    }
+    remove() {
+      const parent = this.parentElement || this.parent;
+      if (parent) parent.children = parent.children.filter(e => e !== this);
+      this.parent = null; this.parentElement = null;
+    }
+    replaceChildren() {
+      for (const child of this.children) { child.parent = null; child.parentElement = null; }
+      this.children = [];
+    }
     addEventListener(event, fn) { this.handlers[event] = fn; }
     click() { if (!this.disabled) return this.handlers.click?.(); }
-    querySelectorAll() { return []; }
+    matches(selector) {
+      if (selector === 'button') return this.tagName === 'BUTTON';
+      if (selector === 'button:not(:disabled)') return this.tagName === 'BUTTON' && !this.disabled;
+      if (selector?.startsWith('.')) return this.classList.contains(selector.slice(1));
+      if (selector?.startsWith('#')) return this.id === selector.slice(1);
+      return false;
+    }
+    querySelectorAll(selector) {
+      const out = [];
+      const visit = el => {
+        for (const child of el.children || []) {
+          if (child.matches?.(selector)) out.push(child);
+          visit(child);
+        }
+      };
+      visit(this);
+      return out;
+    }
+    contains(node) {
+      let n = node;
+      while (n) { if (n === this) return true; n = n.parentElement; }
+      return false;
+    }
+    closest(selector) {
+      let n = this;
+      while (n) { if (n.matches?.(selector)) return n; n = n.parentElement; }
+      return null;
+    }
     setAttribute() {}
     focus() { focus.el = this; if (focus.doc) focus.doc.activeElement = this; }
   }
   const knownIds = new Set([...fs.readFileSync('index.html', 'utf8').matchAll(/id="([^"]+)"/g)].map(m => '#' + m[1]));
-  const elements = new Map(), get = id => { if (!knownIds.has(id)) throw Error('Missing DOM element: ' + id); if (!elements.has(id)) elements.set(id, new Element()); return elements.get(id); };
+  const elements = new Map(), get = id => { if (!knownIds.has(id)) throw Error('Missing DOM element: ' + id); if (!elements.has(id)) elements.set(id, new Element(id)); return elements.get(id); };
   const timers = [], storage = new Map(), listeners = {};
   const documentStub = { querySelector: get, querySelectorAll: () => [], addEventListener(type, fn) { (listeners[type] ||= []).push(fn); }, createElement: () => new Element(), activeElement: null };
   focus.doc = documentStub;
@@ -61,12 +108,19 @@ function fixture() {
   }`, context);
   let source = fs.readFileSync('js/game.js', 'utf8');
   const at = source.lastIndexOf('})();');
-  source = source.slice(0, at) + `Object.assign(harness, { S, initState, runLoop, endPlayerTurn, requestEndTurn, doAttack, saveCheckpoint, loadCheckpoint, saveRules, render, buildFacility, produceBuildings, income, defMult, openAttack, showStart, newGame, recruit, confirmTransfer, changeTransfer, freshArmy, reachable, checkEnd, startInvasion, doExpedition, invasionRaid, expeditionAllowed, borderThreat, setPosture, atkMult, aiTurn, BV, startAim, aimAt, pickedArmy, nextTurn, openSkillPicker, useSkill, aiUseSkills, combatOptions, defenceHoldMs, needsLowChanceConfirm, LOW_CHANCE });` + source.slice(at);
+  source = source.slice(0, at) + `Object.assign(harness, { S, initState, runLoop, endPlayerTurn, requestEndTurn, doAttack, saveCheckpoint, loadCheckpoint, saveRules, render, buildFacility, produceBuildings, income, defMult, openAttack, showStart, newGame, recruit, confirmTransfer, changeTransfer, freshArmy, reachable, checkEnd, startInvasion, doExpedition, invasionRaid, expeditionAllowed, borderThreat, setPosture, atkMult, aiTurn, BV, startAim, aimAt, pickedArmy, nextTurn, openSkillPicker, useSkill, aiUseSkills, combatOptions, defenceHoldMs, needsLowChanceConfirm, LOW_CHANCE, trapFocusTarget, battleFocusables, castTactic, keepBattleFocus });` + source.slice(at);
   vm.runInContext(source, context);
   const h = context.harness;
   h.initState('play', 'taipei');
   Object.assign(h.S, { current: 'taipei', diff: vm.runInContext('DIFFICULTY.easy', context), diffKey: 'easy', menuOpen: false, playerStarted: true });
   h.S.order = ['taipei', ...h.S.order.filter(x => x !== 'taipei')];
+  const adopt = (parent, child) => parent.appendChild(child);
+  const screen = get('#battleScreen'), wrap = get('#bsTacticWrap'), menu = get('#bsTacticMenu'), move = get('#bsMove');
+  for (const id of ['#bsPause', '#bsFast', '#bsSkip', '#bsTacticBtn', '#bsBack', '#bsFwd']) get(id).hidden = false;
+  adopt(screen, get('#bsPause')); adopt(screen, get('#bsFast')); adopt(screen, get('#bsSkip'));
+  adopt(screen, wrap); adopt(wrap, get('#bsTacticBtn')); adopt(wrap, menu);
+  adopt(screen, move); adopt(move, get('#bsBack')); adopt(move, get('#bsFwd'));
+  adopt(screen, get('#bsRetreat')); adopt(screen, get('#bsDone'));
   return { h, context, elements, storage, get, timers, listeners, get focused() { return focus.el; }, async flush() { for (let i = 0; i < 100; i++) { if (timers.length) timers.shift()(); await Promise.resolve(); } } };
 }
 const dataContext = vm.createContext({});
@@ -1554,6 +1608,176 @@ test('modifier+S/Esc/Space do not skip or pause a running battle', async () => {
   await f.flush(); await attack;
   assert.equal(get('#battleScreen').hidden, true);
   assert.equal(h.BV.open, false);
+});
+test('modifier+T does not open the tactic menu; plain t does', async () => {
+  const f = fixture(), { h, get } = f;
+  h.S.army.taipei = { inf: 10 }; h.S.army.newtaipei = { inf: 5 };
+  const attack = h.doAttack('taipei', 'newtaipei', h.S.gen, false, { inf: 4 });
+  await untilStep(f, 0);
+  assert.equal(h.BV.side, 'A');
+  assert.equal(get('#bsTacticWrap').hidden, false);
+  assert.equal(get('#bsTacticMenu').hidden, true);
+  const down = (key, extra = {}) => {
+    let prevented = false;
+    f.listeners.keydown.at(-1)({
+      key, repeat: false,
+      ctrlKey: !!extra.ctrlKey, metaKey: !!extra.metaKey, altKey: !!extra.altKey,
+      preventDefault() { prevented = true; },
+      target: { tagName: 'DIV' },
+    });
+    return prevented;
+  };
+  for (const key of ['t', 'T']) {
+    for (const mod of ['ctrlKey', 'metaKey', 'altKey']) {
+      assert.equal(down(key, { [mod]: true }), false, `${mod}+${key} leaves the browser shortcut`);
+      assert.equal(get('#bsTacticMenu').hidden, true);
+    }
+  }
+  assert.equal(down('t'), true);
+  assert.equal(get('#bsTacticMenu').hidden, false);
+  assert.equal(down('T'), true);
+  assert.equal(get('#bsTacticMenu').hidden, true);
+  await f.flush(); await attack;
+});
+test('modifier+M does not toggle sound; plain m does', () => {
+  const f = fixture(), { get } = f;
+  let muted = true;
+  f.context.Sfx = { muted: () => muted, toggle() { muted = !muted; return muted; } };
+  get('#modal').hidden = true;
+  const down = (key, extra = {}) => {
+    let prevented = false;
+    f.listeners.keydown.at(-1)({
+      key, repeat: false,
+      ctrlKey: !!extra.ctrlKey, metaKey: !!extra.metaKey, altKey: !!extra.altKey,
+      preventDefault() { prevented = true; },
+      target: extra.target || { tagName: 'DIV' },
+    });
+    return prevented;
+  };
+  for (const key of ['m', 'M']) {
+    for (const mod of ['ctrlKey', 'metaKey', 'altKey']) {
+      assert.equal(down(key, { [mod]: true }), false, `${mod}+${key} leaves the browser shortcut`);
+      assert.equal(muted, true);
+      assert.equal(get('#sfxBtn').textContent, '🔇');
+    }
+  }
+  assert.equal(down('m'), true);
+  assert.equal(muted, false);
+  assert.equal(get('#sfxBtn').textContent, '🔊');
+  assert.equal(down('M', { target: { tagName: 'INPUT' } }), false);
+  assert.equal(muted, false, 'typing still swallows a plain M');
+});
+test('modifier+arrows do not move a row; plain arrows do', async () => {
+  const f = fixture(), { h } = f;
+  h.S.army.taipei = { inf: 10, moto: 6 }; h.S.army.newtaipei = { gen: 12, art: 6 };
+  const attack = h.doAttack('taipei', 'newtaipei', h.S.gen, false, { inf: 9, moto: 6 });
+  await untilStep(f, 0);
+  const lanes = () => h.BV.st.laneA.join();
+  const start = lanes();
+  assert.equal(h.BV.sel, 0);
+  const down = (key, extra = {}) => {
+    let prevented = false;
+    f.listeners.keydown.at(-1)({
+      key,
+      ctrlKey: !!extra.ctrlKey, metaKey: !!extra.metaKey, altKey: !!extra.altKey,
+      preventDefault() { prevented = true; },
+      target: { tagName: 'DIV' },
+    });
+    return prevented;
+  };
+  assert.equal(down('ArrowLeft', { altKey: true }), false);
+  assert.equal(down('ArrowRight', { ctrlKey: true }), false);
+  assert.equal(down('ArrowLeft', { metaKey: true }), false);
+  assert.equal(down('ArrowRight', { altKey: true }), false);
+  assert.equal(lanes(), start);
+  assert.equal(h.BV.sel, 0);
+  assert.equal(down('ArrowLeft'), true);
+  assert.equal(h.BV.sel, 1);
+  assert.notEqual(lanes(), start);
+  const moved = lanes();
+  assert.equal(down('ArrowRight'), true);
+  assert.equal(h.BV.sel, 0);
+  assert.equal(lanes(), start);
+  assert.notEqual(lanes(), moved);
+  await f.flush(); await attack;
+});
+test('modifier+E/Enter/Escape do not end the turn or confirm or cancel an attack', () => {
+  const f = fixture(), { h, get } = f;
+  get('#modal').hidden = true;
+  h.render();
+  const btn = get('#endTurn');
+  const label = btn.textContent;
+  const down = (key, extra = {}) => {
+    let prevented = false;
+    f.listeners.keydown.at(-1)({
+      key,
+      ctrlKey: !!extra.ctrlKey, metaKey: !!extra.metaKey, altKey: !!extra.altKey,
+      preventDefault() { prevented = true; },
+      target: extra.target || { tagName: 'DIV' },
+    });
+    return prevented;
+  };
+  assert.equal(down('e', { ctrlKey: true }), false);
+  assert.equal(down('Enter', { metaKey: true }), false);
+  assert.equal(h.S.current, 'taipei');
+  assert.equal(btn.textContent, label);
+  assert.equal(btn.classList.contains('confirming'), false);
+  h.S.sel = 'taipei';
+  assert.equal(down('Escape', { altKey: true }), false);
+  assert.equal(h.S.sel, 'taipei');
+
+  h.S.army.taipei = { inf: 5 }; h.S.army.newtaipei = { inf: 1 };
+  h.openAttack('taipei', 'newtaipei');
+  assert.equal(down('Enter', { ctrlKey: true }), false);
+  assert.equal(get('#attackDialog').hidden, false);
+  assert.equal(h.S.acted.has('taipei'), false);
+  assert.equal(down('Escape', { ctrlKey: true }), false);
+  assert.equal(get('#attackDialog').hidden, false);
+  assert.ok(h.S.attack);
+});
+test('trapFocusTarget wraps the ends and leaves the middle to the browser', () => {
+  const { h } = fixture();
+  const first = { id: 'first' }, mid = { id: 'mid' }, last = { id: 'last' };
+  const list = [first, mid, last];
+  const outside = { id: 'outside' }, container = { id: 'battleScreen' };
+  assert.equal(h.trapFocusTarget(list, last, false), first);
+  assert.equal(h.trapFocusTarget(list, first, true), last);
+  assert.equal(h.trapFocusTarget(list, container, false), first);
+  assert.equal(h.trapFocusTarget(list, container, true), last);
+  assert.equal(h.trapFocusTarget(list, outside, false), first);
+  assert.equal(h.trapFocusTarget(list, outside, true), last);
+  assert.equal(h.trapFocusTarget(list, mid, false), null);
+  assert.equal(h.trapFocusTarget(list, mid, true), null);
+});
+test('disabling 往前 moves focus to the other move button or the battle screen; castTactic focuses the screen', async () => {
+  const f = fixture(), { h, get } = f;
+  h.S.army.taipei = { inf: 10, moto: 6 }; h.S.army.newtaipei = { gen: 12, art: 6 };
+  const attack = h.doAttack('taipei', 'newtaipei', h.S.gen, false, { inf: 9, moto: 6 });
+  await untilStep(f, 0);
+  const fwd = get('#bsFwd'), back = get('#bsBack'), screen = get('#battleScreen');
+  assert.equal(h.BV.sel, 0);
+  assert.equal(fwd.disabled, true);
+  back.focus();
+  back.handlers.click();
+  assert.equal(h.BV.sel, 1);
+  assert.equal(fwd.disabled, false);
+  fwd.focus();
+  fwd.handlers.click();
+  assert.equal(fwd.disabled, true);
+  assert.ok(f.focused === back || f.focused === screen);
+  assert.notEqual(f.focused, null);
+  assert.notEqual(f.focused, f.context.document.body);
+  assert.notEqual(f.context.document.activeElement, null);
+  assert.notEqual(f.context.document.activeElement, f.context.document.body);
+  assert.notEqual(f.focused, fwd);
+
+  get('#bsTacticBtn').focus();
+  assert.equal(h.castTactic('fire'), true);
+  assert.equal(get('#bsTacticBtn').disabled, true);
+  assert.equal(get('#bsTacticMenu').hidden, true);
+  assert.equal(f.focused, screen);
+  assert.notEqual(f.context.document.activeElement, f.context.document.body);
+  await f.flush(); await attack;
 });
 test('needsLowChanceConfirm is true at or below 10 percent', () => {
   const { h } = fixture();
