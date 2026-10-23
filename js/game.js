@@ -80,12 +80,15 @@
     try { Sfx.play(name); } catch { /* 音效失敗就略過 */ }
   }
   function syncSfxBtn() {
-    const btn = $('#sfxBtn');
     const off = typeof Sfx === 'undefined' || Sfx.muted();
-    btn.textContent = off ? '🔇' : '🔊';
     const label = off ? '音效：關' : '音效：開';
-    btn.title = label;
-    btn.setAttribute('aria-label', label);
+    for (const id of ['sfxBtn', 'sfxBtnStart']) {
+      const btn = $('#' + id);
+      if (!btn) continue;
+      btn.textContent = off ? '🔇' : '🔊';
+      btn.title = label;
+      btn.setAttribute('aria-label', label);
+    }
   }
   function toggleSfx() {
     if (typeof Sfx === 'undefined') return;
@@ -283,11 +286,14 @@
   // ───────── 戰鬥 ─────────
   function combatOptions(src, tgt, sent) {
     const fa = S.owner[src], fd = S.owner[tgt];
-    return { sent, defenders: S.army[tgt], units: S.units, counters: COUNTERS,
+    const options = { sent, defenders: S.army[tgt], units: S.units, counters: COUNTERS,
       attackMult: atkMult(fa, src), defenseMult: defMult(fd, tgt),
       defenderAttack: 1 + 0.12 * S.research[fd].atk,
       attackerMoto: byId[src].moto || 1, defenderMoto: byId[tgt].moto || 1,
       adapt: fd === S.player ? 'A' : 'D' }; // AI 那一方每合重新排兵（玩家守城時是攻方 AI，否則守方）
+    // 玩家攻打 AI 時，守方戰術走 Combat.step，觀戰／略過／⚡／預估同一套。
+    if (fa === S.player && fd !== S.player) options.aiTactic = { side: 'D', research: S.research[fd] };
+    return options;
   }
 
   async function doAttack(src, tgt, gen, half = false, deployment = null) {
@@ -308,8 +314,7 @@
       clearArrows();
       r = await playBattle({ title: `${byId[tgt].short}攻防戰`, emblem: emblemOf(tgt), canRetreat: fa === S.player,
         att: { name: byId[src].short, color: byId[fa].color, mine: fa === S.player },
-        def: { name: byId[tgt].short, color: byId[fd].color, mine: fd === S.player },
-        ai: fd === S.player ? null : { side: 'D', research: S.research[fd] } }, options, gen);
+        def: { name: byId[tgt].short, color: byId[fd].color, mine: fd === S.player } }, options, gen);
       if (gen !== S.gen || S.over) return;
       await finishBattle(r, gen);
       if (gen !== S.gen || S.over) return;
@@ -903,6 +908,29 @@
     clearAim();
   }
 
+  const LOW_CHANCE = 10;
+  function needsLowChanceConfirm(chance) {
+    return Number.isFinite(Number(chance)) && Number(chance) <= LOW_CHANCE;
+  }
+  function armLowChanceWarning(chance) {
+    const btn = $('#attackConfirm');
+    btn.classList.add('danger');
+    btn.classList.remove('primary');
+    btn.textContent = `⚠️ 勝率僅 ${chance}%，仍要出征？`;
+    const warn = $('#lowChanceWarning');
+    warn.hidden = false;
+    warn.textContent = `⚠️ 預估攻陷機率僅 ${chance}%。再按一次才會出征。`;
+  }
+  function resetLowChanceWarning(total) {
+    const btn = $('#attackConfirm');
+    btn.classList.remove('danger');
+    btn.classList.add('primary');
+    btn.textContent = `⚔️ 確認出征 ${total} 人`;
+    const warn = $('#lowChanceWarning');
+    warn.hidden = true;
+    warn.textContent = '';
+  }
+
   function openAttack(src, tgt, kind = 'county') {
     cancelEndTurnConfirm();
     S.attack = { src, tgt, kind, sent: Combat.plan(freshArmy(src), S.units, S.sendHalf) };
@@ -940,8 +968,10 @@
     const risk = borderThreat(src, reserveArmy);
     $('#reserveWarning').textContent = `${home} 人留守${byId[src].short}。` + (risk.peace ? '目前仍在和平期。' : risk.level === 'high' ? '⚠️ 鄰國兵力明顯超過留守部隊，可能遭到反攻。' : risk.threats.length ? '鄰國可能反攻，請搭配駐防與要塞。' : S.invasion ? '請保留守軍應對外星空襲。' : '目前無相鄰敵軍。');
     $('#reserveWarning').className = 'reserveWarning' + (!risk.peace && risk.level === 'high' ? ' danger' : '');
+    S.attack.chance = estimate ? estimate.chance : null;
+    S.attack.lowChanceWarned = false;
     $('#attackConfirm').disabled = !valid;
-    $('#attackConfirm').textContent = `⚔️ 確認出征 ${total} 人`;
+    resetLowChanceWarning(total);
   }
   $('#attackRows').addEventListener('click', e => {
     const b = e.target.closest('button[data-unit]');
@@ -980,16 +1010,21 @@
     const { src, tgt, sent, kind } = S.attack;
     if (kind === 'invasion') {
       if (!expeditionAllowed(src, tgt) || !Combat.validDeployment(freshArmy(src), sent, S.units)) return;
+    } else if (S.owner[src] !== S.player || S.owner[tgt] === S.player || S.acted.has(src) || stunned(src) || !Combat.validDeployment(freshArmy(src), sent, S.units)) return;
+    const chance = S.attack.chance;
+    if (needsLowChanceConfirm(chance) && !S.attack.lowChanceWarned) {
+      S.attack.lowChanceWarned = true;
+      armLowChanceWarning(chance);
       sfx('click');
-      $('#attackDialog').hidden = true;
-      S.attack = null;
-      await doExpedition(src, tgt, sent, S.gen);
       return;
     }
-    if (S.owner[src] !== S.player || S.owner[tgt] === S.player || S.acted.has(src) || stunned(src) || !Combat.validDeployment(freshArmy(src), sent, S.units)) return;
     sfx('click');
     $('#attackDialog').hidden = true;
     S.attack = null;
+    if (kind === 'invasion') {
+      await doExpedition(src, tgt, sent, S.gen);
+      return;
+    }
     S.busy = true;
     const gen = S.gen;
     await doAttack(src, tgt, gen, false, sent);
@@ -1191,10 +1226,35 @@
   const SHOW_PER_ROW = 8; // 一排最多畫 8 個，其餘用數字表示
   // 角色圖大多面向右（或正面）；面向左的列在這裡。戰場上左方面向右、右方面向左，雙方面對面
   const FACE_LEFT = new Set(['assets/units/icons/13-fish.webp']);
-  async function battleSleep(ms, gen) {
-    await new Promise(r => { BV.wake = r; setTimeout(r, ms / S.speed / BV.fast); });
+  async function battleSleep(ms, gen, realtime = false) {
+    await new Promise(r => { BV.wake = r; setTimeout(r, realtime ? ms : ms / S.speed / BV.fast); });
     BV.wake = null;
     while ((BV.paused || S.menuOpen || !$('#bsTacticMenu').hidden) && gen === S.gen && !BV.skip && !BV.retreat) await new Promise(r => setTimeout(r, 120));
+  }
+  function defenceHoldMs(view) {
+    return view && view.def?.mine && !view.att?.mine ? 3000 : 0;
+  }
+  function endDefenceHold() {
+    if (!BV.holding) return;
+    BV.holding = false;
+    BV.wake?.();
+  }
+  async function holdForDefence(view, gen) {
+    const total = defenceHoldMs(view);
+    if (!total || gen !== S.gen) return;
+    BV.holding = true;
+    $('#battleScreen').focus();
+    const el = $('#bsHold');
+    el.hidden = false;
+    let remain = Math.max(1, Math.ceil(total / 1000));
+    while (BV.holding && !BV.skip && !BV.retreat && gen === S.gen && remain > 0) {
+      el.textContent = `🛡️ 守城戰！可先使用 🎴 戰術（${remain} 秒後自動開戰）`;
+      await new Promise(r => { BV.wake = r; setTimeout(r, 1000); });
+      BV.wake = null;
+      remain--;
+    }
+    BV.holding = false;
+    el.hidden = true;
   }
   // 一排（直的）士兵：n = 這合開始時人數，left = 這合結束剩下的人數，dmg = 這排受到的傷害
   function battleCol(k, n, left, dmg, round) {
@@ -1259,7 +1319,7 @@
   // 逐合即時結算，回傳戰果（撤退時取當下兵力）；遊戲被換掉則回傳 null
   async function playBattle(view, options, gen) {
     const st = Combat.setup(options);
-    Object.assign(BV, { open: true, skip: false, retreat: false, paused: false, step: 0, st, opts: options, view,
+    Object.assign(BV, { open: true, skip: false, retreat: false, paused: false, holding: false, step: 0, st, opts: options, view,
       side: view.att.mine ? 'A' : view.def.mine ? 'D' : null, sel: 0 });
     $('#bsTitle').textContent = view.title;
     $('#bsEmblem').innerHTML = view.emblem;
@@ -1275,14 +1335,21 @@
     drawBattle(0);
     $('#bsTacticMenu').hidden = true;
     $('#bsFloat').hidden = true;
+    $('#bsHold').hidden = true;
     renderTacticBtn();
     $('#bsSkip').focus();
     sfx('attack');
-    await battleSleep(1400, gen);
+    await holdForDefence(view, gen);
+    if (gen !== S.gen) return null;
+    if (!BV.skip && !BV.retreat) await battleSleep(1400, gen, defenceHoldMs(view) > 0);
     while (!st.done && !BV.retreat && gen === S.gen) {
       if (BV.skip) { while (!st.done) Combat.step(st, options); break; }
-      maybeAiTactic(st);
+      const usedBefore = st.tacticUsed?.D;
       Combat.step(st, options);
+      if (st.tacticUsed?.D && st.tacticUsed.D !== usedBefore && BV.side !== 'D') {
+        const t = TACTICS[st.tacticUsed.D];
+        if (t) shoutTactic(t);
+      }
       BV.step = st.round;
       drawBattle(st.round);
       sfx('attack');
@@ -1305,6 +1372,7 @@
     $('#bsRetreat').hidden = true;
     $('#bsTacticMenu').hidden = true;
     $('#bsFloat').hidden = true;
+    $('#bsHold').hidden = true;
     renderTacticBtn();
     $('#bsDone').hidden = false;
     $('#bsDone').focus();
@@ -1350,6 +1418,7 @@
     menu.hidden = !menu.hidden;
     if (!menu.hidden) fillTacticMenu();
     $('#bsTacticBtn').setAttribute('aria-expanded', menu.hidden ? 'false' : 'true');
+    endDefenceHold();
   }
   function shoutTactic(t) {
     const el = $('#bsFloat');
@@ -1368,14 +1437,8 @@
     $('#bsTacticBtn').setAttribute('aria-expanded', 'false');
     renderTacticBtn();
     drawBattle(BV.step, null, true);
+    endDefenceHold();
     return true;
-  }
-  // 玩家觀戰時，守方 AI 可以在兵力掉到一半以下用一次戰術。略過與 ⚡ 不走這裡。
-  function maybeAiTactic(st) {
-    const ai = BV.view?.ai;
-    if (!ai || ai.side !== 'D') return;
-    const key = Combat.aiTactic(st, ai.research);
-    if (key && TACTICS[key]) shoutTactic(TACTICS[key]);
   }
   // 換排：把選取的我方那一排往前（靠城牆，delta = -1）或往後移，和相鄰那排對調
   function moveRow(delta) {
@@ -1401,8 +1464,11 @@
     drawBattle(BV.step, null, true);
     return true;
   }
-  function skipBattle() { BV.skip = true; BV.wake?.(); }
-  function toggleBattlePause() { BV.paused = !BV.paused; renderBattleCtrls(); }
+  function skipBattle() { BV.skip = true; endDefenceHold(); BV.wake?.(); }
+  function toggleBattlePause() {
+    if (BV.holding) { endDefenceHold(); return; }
+    BV.paused = !BV.paused; renderBattleCtrls();
+  }
   $('#bsSkip').addEventListener('click', skipBattle);
   $('#bsDone').addEventListener('click', skipBattle);
   $('#bsPause').addEventListener('click', toggleBattlePause);
@@ -1949,6 +2015,7 @@
   });
   $('#endTurn').addEventListener('click', requestEndTurn);
   $('#sfxBtn').addEventListener('click', toggleSfx);
+  $('#sfxBtnStart').addEventListener('click', toggleSfx);
   $('#pauseBtn').addEventListener('click', () => { S.paused = !S.paused; renderPanel(); });
   $('#speed').addEventListener('click', e => {
     const b = e.target.closest('button');
@@ -1978,9 +2045,11 @@
     if ((e.key === 'm' || e.key === 'M') && !e.repeat) {
       const tag = e.target?.tagName;
       const typing = tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || e.target?.isContentEditable;
-      const dialog = !$('#attackDialog').hidden || !$('#modal').hidden || !$('#designer').hidden || !$('#transfer').hidden || !$('#skillPicker').hidden;
-      // 戰鬥畫面沒有用到 m，對話框與文字欄位有焦點時不搶快捷鍵
-      if (!typing && !dialog) { e.preventDefault(); toggleSfx(); }
+      const startScreen = !$('#modal').hidden && !$('#startView').hidden;
+      const blockingDialog = !$('#attackDialog').hidden || !$('#designer').hidden || !$('#transfer').hidden || !$('#skillPicker').hidden
+        || (!$('#modal').hidden && !startScreen);
+      // 開始畫面可切音效；出征／調兵／組建／技能視窗與結束畫面不搶 M
+      if (!typing && !blockingDialog) { e.preventDefault(); toggleSfx(); }
     }
     if (e.key === 'Tab' && !$('#attackDialog').hidden) {
       const controls = [...$('#attackDialog').querySelectorAll('button:not(:disabled)')];
@@ -1989,6 +2058,13 @@
       else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first.focus(); }
     }
     if (e.key === 'Escape' && !$('#attackDialog').hidden) { $('#attackCancel').click(); return; }
+    if (e.key === 'Enter' && !$('#attackDialog').hidden) {
+      // 焦點在任何按鈕上時交給瀏覽器原生 click，避免 ±／預設鍵被當成確認出征。
+      if (e.target?.tagName === 'BUTTON') return;
+      e.preventDefault();
+      if (!$('#attackConfirm').disabled) $('#attackConfirm').click();
+      return;
+    }
     if (BV.open) {
       if (e.key === 'Escape') skipBattle();
       if ((e.key === 't' || e.key === 'T') && !e.repeat) { e.preventDefault(); toggleTacticMenu(); }
