@@ -1375,6 +1375,7 @@
     $('#bsHold').hidden = true;
     renderTacticBtn();
     $('#bsDone').hidden = false;
+    keepBattleFocus($('#bsDone'));
     $('#bsDone').focus();
     Object.assign(BV, { skip: false, retreat: false });
     await battleSleep(2400, gen);
@@ -1389,6 +1390,8 @@
     $('#bsPause').textContent = BV.paused ? '▶' : '⏸';
     $('#bsPause').setAttribute('aria-label', BV.paused ? '繼續戰鬥' : '暫停戰鬥');
     $('#bsFast').textContent = `⏩ ${BV.fast}x`;
+    const done = $('#bsDone');
+    keepBattleFocus(done && !done.hidden ? done : $('#battleScreen'));
   }
   const tacticUnlocked = (key, research) => !!TACTICS[key]?.need?.(research || { atk: 0, def: 0, eco: 0 });
   function renderTacticBtn() {
@@ -1415,10 +1418,15 @@
   function toggleTacticMenu() {
     if (!BV.open || !BV.side || !BV.st || BV.st.done || BV.st.tacticUsed?.[BV.side]) return;
     const menu = $('#bsTacticMenu');
+    const closing = !menu.hidden;
     menu.hidden = !menu.hidden;
     if (!menu.hidden) fillTacticMenu();
     $('#bsTacticBtn').setAttribute('aria-expanded', menu.hidden ? 'false' : 'true');
     endDefenceHold();
+    if (closing) {
+      const btn = $('#bsTacticBtn');
+      keepBattleFocus(btn.disabled ? $('#battleScreen') : btn);
+    }
   }
   function shoutTactic(t) {
     const el = $('#bsFloat');
@@ -1438,6 +1446,7 @@
     renderTacticBtn();
     drawBattle(BV.step, null, true);
     endDefenceHold();
+    keepBattleFocus($('#battleScreen'));
     return true;
   }
   // 換排：把選取的我方那一排往前（靠城牆，delta = -1）或往後移，和相鄰那排對調
@@ -1473,8 +1482,8 @@
   $('#bsDone').addEventListener('click', skipBattle);
   $('#bsPause').addEventListener('click', toggleBattlePause);
   $('#bsFast').addEventListener('click', () => { BV.fast = BV.fast >= 4 ? 1 : BV.fast * 2; renderBattleCtrls(); });
-  $('#bsFwd').addEventListener('click', () => moveRow(-1));
-  $('#bsBack').addEventListener('click', () => moveRow(1));
+  $('#bsFwd').addEventListener('click', () => { moveRow(-1); focusAfterRowMove($('#bsFwd')); });
+  $('#bsBack').addEventListener('click', () => { moveRow(1); focusAfterRowMove($('#bsBack')); });
   $('#bsField').addEventListener('click', e => {
     const lane = e.target.closest?.('[data-lane]'), foe = e.target.closest?.('[data-foe]');
     if (lane) selectRow(Number(lane.dataset.lane));
@@ -1485,6 +1494,7 @@
     BV.retreat = true;
     $('#bsRetreat').disabled = true;
     BV.wake?.();
+    keepBattleFocus($('#battleScreen'));
   });
   $('#bsTacticBtn').addEventListener('click', () => { if (!$('#bsTacticBtn').disabled) toggleTacticMenu(); });
   $('#bsTacticMenu').addEventListener('click', e => {
@@ -2062,6 +2072,37 @@
     const nodes = typeof root?.querySelectorAll === 'function' ? root.querySelectorAll('button') : [];
     return [...nodes].filter(btn => btn && !btn.disabled && !insideHidden(btn, root));
   }
+  function battleFocusUnusable(el) {
+    if (!el || el === document.body) return true;
+    if (el.disabled) return true;
+    const screen = $('#battleScreen');
+    if (!screen) return true;
+    if (insideHidden(el, screen)) return true;
+    if (el === screen) return false;
+    if (typeof screen.contains === 'function') return !screen.contains(el);
+    return false;
+  }
+  function canTakeBattleFocus(el) {
+    if (!el || el.disabled || el.hidden) return false;
+    const screen = $('#battleScreen');
+    if (el === screen) return true;
+    if (insideHidden(el, screen)) return false;
+    if (typeof screen?.contains === 'function' && !screen.contains(el)) return false;
+    return true;
+  }
+  // 只在目前焦點已不可用時移動，避免搶走還能操作的按鈕。
+  function keepBattleFocus(preferred) {
+    if (!BV.open) return;
+    if (!battleFocusUnusable(document.activeElement)) return;
+    const screen = $('#battleScreen');
+    const target = canTakeBattleFocus(preferred) ? preferred : screen;
+    target?.focus?.();
+  }
+  function focusAfterRowMove(used) {
+    if (!used?.disabled) return;
+    const other = used === $('#bsFwd') ? $('#bsBack') : $('#bsFwd');
+    keepBattleFocus(canTakeBattleFocus(other) ? other : $('#battleScreen'));
+  }
   // Shift 不算在內：大寫 S／T／M 與 Shift+Tab 仍要有效。
   const hasModifier = e => !!(e.ctrlKey || e.metaKey || e.altKey);
   document.addEventListener('keydown', e => {
@@ -2116,6 +2157,7 @@
         e.preventDefault();
         const forward = e.key === 'ArrowRight'; // 我方在左：→ 往前
         moveRow(forward ? -1 : 1);
+        focusAfterRowMove($(forward ? '#bsFwd' : '#bsBack'));
       }
       if (e.key === ' ') {
         // 焦點在按鈕上時，空白鍵交給瀏覽器原生按下。
