@@ -108,7 +108,7 @@ function fixture() {
   }`, context);
   let source = fs.readFileSync('js/game.js', 'utf8');
   const at = source.lastIndexOf('})();');
-  source = source.slice(0, at) + `Object.assign(harness, { S, initState, runLoop, endPlayerTurn, requestEndTurn, doAttack, saveCheckpoint, loadCheckpoint, saveRules, render, buildFacility, produceBuildings, income, defMult, openAttack, showStart, newGame, recruit, confirmTransfer, changeTransfer, freshArmy, reachable, checkEnd, startInvasion, doExpedition, invasionRaid, expeditionAllowed, borderThreat, setPosture, atkMult, aiTurn, BV, startAim, aimAt, pickedArmy, nextTurn, openSkillPicker, useSkill, aiUseSkills, combatOptions, defenceHoldMs, needsLowChanceConfirm, LOW_CHANCE, trapFocusTarget, battleFocusables, castTactic, keepBattleFocus });` + source.slice(at);
+  source = source.slice(0, at) + `Object.assign(harness, { S, initState, runLoop, endPlayerTurn, requestEndTurn, doAttack, saveCheckpoint, loadCheckpoint, saveRules, render, buildFacility, produceBuildings, income, defMult, openAttack, showStart, newGame, recruit, confirmTransfer, changeTransfer, freshArmy, reachable, checkEnd, startInvasion, doExpedition, invasionRaid, expeditionAllowed, borderThreat, setPosture, atkMult, aiTurn, BV, startAim, aimAt, pickedArmy, nextTurn, openSkillPicker, useSkill, aiUseSkills, combatOptions, defenceHoldMs, needsLowChanceConfirm, LOW_CHANCE, trapFocusTarget, battleFocusables, castTactic, keepBattleFocus, restoreFocusAfterBattle, captureBattleReturnFocus, closeBattle });` + source.slice(at);
   vm.runInContext(source, context);
   const h = context.harness;
   h.initState('play', 'taipei');
@@ -1522,6 +1522,137 @@ test('a player attack battle keeps focus on the battle screen', async () => {
   assert.notEqual(f.focused, get('#bsSkip'));
   await f.flush(); await attack;
 });
+test('after a battle ends ⏸ and ⏩ are disabled and Tab only cycles 繼續; a new battle re-enables them', async () => {
+  const f = fixture(), { h, get } = f;
+  h.S.army.taipei = { inf: 10 }; h.S.army.newtaipei = { inf: 2 };
+  const battle = h.doAttack('taipei', 'newtaipei', h.S.gen, false, { inf: 9 });
+  await untilStep(f, 0);
+  assert.equal(get('#bsPause').disabled, false);
+  assert.equal(get('#bsFast').disabled, false);
+  get('#bsPause').focus();
+  get('#bsSkip').handlers.click();
+  for (let i = 0; i < 50 && get('#bsDone').hidden; i++) await Promise.resolve();
+  assert.equal(get('#bsDone').hidden, false);
+  assert.equal(get('#bsPause').disabled, true);
+  assert.equal(get('#bsFast').disabled, true);
+  assert.equal(get('#bsSkip').disabled, true);
+  const focusables = h.battleFocusables();
+  assert.equal(focusables.length, 1);
+  assert.equal(focusables[0].id, 'bsDone');
+  assert.equal(focusables[0], get('#bsDone'));
+  assert.equal(f.focused, get('#bsDone'));
+  assert.equal(f.context.document.activeElement, get('#bsDone'));
+  for (const shiftKey of [false, true]) {
+    let prevented = false;
+    f.listeners.keydown.at(-1)({
+      key: 'Tab', shiftKey,
+      preventDefault() { prevented = true; },
+      target: get('#bsDone'),
+    });
+    assert.equal(prevented, true);
+    assert.equal(f.focused, get('#bsDone'));
+    assert.equal(f.context.document.activeElement, get('#bsDone'));
+  }
+  get('#bsDone').handlers.click();
+  await f.flush(); await battle;
+  h.S.over = false;
+  h.S.owner.newtaipei = 'newtaipei';
+  h.S.army.taipei = { inf: 10 };
+  h.S.army.newtaipei = { inf: 5 };
+  h.S.acted.delete('taipei');
+  delete h.S.moved.taipei;
+  delete h.S.moved.newtaipei;
+  const again = h.doAttack('taipei', 'newtaipei', h.S.gen, false, { inf: 4 });
+  await untilStep(f, 0);
+  assert.equal(get('#bsPause').disabled, false);
+  assert.equal(get('#bsFast').disabled, false);
+  assert.equal(get('#bsDone').hidden, true);
+  const open = h.battleFocusables();
+  assert.ok(open.includes(get('#bsPause')));
+  assert.ok(open.includes(get('#bsFast')));
+  await f.flush(); await again;
+});
+async function skipThenCloseBattle(f) {
+  f.get('#bsSkip').handlers.click();
+  for (let i = 0; i < 50 && f.get('#bsDone').hidden; i++) await Promise.resolve();
+  if (!f.get('#bsDone').hidden) f.get('#bsDone').handlers.click();
+  await f.flush();
+}
+test('closing the battle screen returns focus to the element focused before the battle, or the map', async () => {
+  {
+    const f = fixture(), { h, get } = f;
+    const endTurn = get('#endTurn');
+    endTurn.hidden = false;
+    endTurn.disabled = false;
+    endTurn.focus();
+    h.S.army.taipei = { inf: 10 }; h.S.army.newtaipei = { inf: 2 };
+    const battle = h.doAttack('taipei', 'newtaipei', h.S.gen, false, { inf: 9 });
+    await untilStep(f, 0);
+    assert.equal(h.BV.returnFocus, endTurn);
+    await skipThenCloseBattle(f); await battle;
+    assert.equal(get('#battleScreen').hidden, true);
+    assert.equal(f.focused, endTurn);
+    assert.equal(f.context.document.activeElement, endTurn);
+    assert.notEqual(f.focused, f.context.document.body);
+    assert.equal(h.BV.returnFocus, null);
+  }
+  {
+    const f = fixture(), { h, get } = f;
+    const endTurn = get('#endTurn');
+    endTurn.hidden = false;
+    endTurn.disabled = false;
+    endTurn.focus();
+    h.S.army.taipei = { inf: 10 }; h.S.army.newtaipei = { inf: 2 };
+    const battle = h.doAttack('taipei', 'newtaipei', h.S.gen, false, { inf: 9 });
+    await untilStep(f, 0);
+    endTurn.disabled = true;
+    await skipThenCloseBattle(f); await battle;
+    assert.equal(f.focused, get('#map'));
+    assert.equal(f.context.document.activeElement, get('#map'));
+    assert.notEqual(f.focused, f.context.document.body);
+    assert.notEqual(f.context.document.activeElement, f.context.document.body);
+    assert.equal(h.BV.returnFocus, null);
+  }
+  {
+    const f = fixture(), { h, get } = f;
+    const dlg = get('#attackDialog'), btn = get('#endTurn');
+    btn.hidden = false;
+    dlg.hidden = false;
+    dlg.appendChild(btn);
+    btn.focus();
+    h.S.army.taipei = { inf: 10 }; h.S.army.newtaipei = { inf: 2 };
+    const battle = h.doAttack('taipei', 'newtaipei', h.S.gen, false, { inf: 9 });
+    await untilStep(f, 0);
+    dlg.hidden = true;
+    await skipThenCloseBattle(f); await battle;
+    assert.equal(f.focused, get('#map'));
+    assert.notEqual(f.focused, f.context.document.body);
+  }
+  {
+    const f = fixture(), { h, get } = f;
+    const body = { id: 'body', tagName: 'BODY' };
+    f.context.document.body = body;
+    f.context.document.activeElement = body;
+    h.S.army.taipei = { inf: 10 }; h.S.army.newtaipei = { inf: 2 };
+    const battle = h.doAttack('taipei', 'newtaipei', h.S.gen, false, { inf: 9 });
+    await untilStep(f, 0);
+    assert.equal(h.BV.returnFocus, null);
+    await skipThenCloseBattle(f); await battle;
+    assert.equal(f.focused, get('#map'));
+    assert.notEqual(f.focused, body);
+    assert.notEqual(f.context.document.activeElement, body);
+  }
+  {
+    const f = fixture(), { h, get } = f;
+    const btn = get('#newBtn');
+    btn.focus();
+    h.BV.returnFocus = get('#endTurn');
+    h.closeBattle();
+    assert.equal(f.focused, btn);
+    assert.equal(f.context.document.activeElement, btn);
+    assert.equal(h.BV.returnFocus, null);
+  }
+});
 test('space pauses a running attack when no button is focused; a focused button keeps native Space; S skips', async () => {
   const f = fixture(), { h, get } = f;
   h.S.army.taipei = { inf: 10 }; h.S.army.newtaipei = { inf: 5 };
@@ -1734,6 +1865,50 @@ test('modifier+E/Enter/Escape do not end the turn or confirm or cancel an attack
   assert.equal(down('Escape', { ctrlKey: true }), false);
   assert.equal(get('#attackDialog').hidden, false);
   assert.ok(h.S.attack);
+});
+test('Shift+E ends the turn like e; Ctrl/Meta/Alt+E (with or without Shift) still do nothing', () => {
+  const f = fixture(), { h, get } = f;
+  get('#modal').hidden = true;
+  h.render();
+  const btn = get('#endTurn');
+  const label = btn.textContent;
+  const down = (key, extra = {}) => {
+    let prevented = false;
+    f.listeners.keydown.at(-1)({
+      key,
+      ctrlKey: !!extra.ctrlKey, metaKey: !!extra.metaKey, altKey: !!extra.altKey,
+      shiftKey: !!extra.shiftKey,
+      preventDefault() { prevented = true; },
+      target: extra.target || { tagName: 'DIV' },
+    });
+    return prevented;
+  };
+  const blocked = [
+    { ctrlKey: true },
+    { metaKey: true },
+    { altKey: true },
+    { ctrlKey: true, shiftKey: true },
+    { metaKey: true, shiftKey: true },
+    { altKey: true, shiftKey: true },
+  ];
+  for (const extra of blocked) assert.equal(down('E', extra), false);
+  assert.equal(h.S.current, 'taipei');
+  assert.equal(btn.textContent, label);
+  assert.equal(btn.classList.contains('confirming'), false);
+
+  assert.equal(down('E', { shiftKey: true }), false);
+  assert.equal(h.S.current, 'taipei');
+  assert.equal(btn.textContent, '還有 1 個縣市可出征，確定結束？');
+  assert.equal(btn.classList.contains('confirming'), true);
+
+  for (const extra of blocked) assert.equal(down('E', extra), false);
+  assert.equal(h.S.current, 'taipei');
+  assert.equal(btn.textContent, '還有 1 個縣市可出征，確定結束？');
+  assert.equal(btn.classList.contains('confirming'), true);
+
+  down('E', { shiftKey: true });
+  assert.notEqual(h.S.current, 'taipei');
+  assert.equal(btn.classList.contains('confirming'), false);
 });
 test('trapFocusTarget wraps the ends and leaves the middle to the browser', () => {
   const { h } = fixture();

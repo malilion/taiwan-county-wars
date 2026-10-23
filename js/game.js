@@ -1220,7 +1220,7 @@
 
   // ───────── 戰鬥畫面：玩家參戰時播放（觀戰或 ⚡ 速度時略過） ─────────
   // 每種兵一排，逐合即時結算，打到一方全滅或沙漏見底；玩家可用 ▲▼ 換自己的排、改變對位，每邊可使用一次戰術，攻方可戰略撤退
-  const BV = { open: false, skip: false, retreat: false, paused: false, fast: 1, step: 0, st: null, opts: null, view: null, side: null, sel: 0, wake: null };
+  const BV = { open: false, skip: false, retreat: false, paused: false, fast: 1, step: 0, st: null, opts: null, view: null, side: null, sel: 0, wake: null, returnFocus: null };
   const watchBattle = (fa, fd) => S.mode === 'play' && S.speed < 99 && (fa === S.player || fd === S.player);
   const emblemOf = id => byId[id].portrait ? `<img src="${byId[id].portrait}" alt="">` : byId[id].short.slice(0, 1);
   const SHOW_PER_ROW = 8; // 一排最多畫 8 個，其餘用數字表示
@@ -1321,12 +1321,16 @@
     const st = Combat.setup(options);
     Object.assign(BV, { open: true, skip: false, retreat: false, paused: false, holding: false, step: 0, st, opts: options, view,
       side: view.att.mine ? 'A' : view.def.mine ? 'D' : null, sel: 0 });
+    // 開戰前先記下焦點；接著 keepBattleFocus 會把焦點移進戰鬥畫面。
+    captureBattleReturnFocus();
     $('#bsTitle').textContent = view.title;
     $('#bsEmblem').innerHTML = view.emblem;
     $('#bsEmblem').style.background = view.def.color;
     $('#bsRetreat').hidden = !view.canRetreat;
     $('#bsRetreat').disabled = false;
     $('#bsSkip').disabled = false;
+    $('#bsPause').disabled = false;
+    $('#bsFast').disabled = false;
     $('#bsDone').hidden = true;
     $('#bsStamp').hidden = true;
     $('#tip').hidden = true;
@@ -1369,6 +1373,8 @@
     $('#bsStamp').hidden = false;
     if (BV.view?.att?.mine || BV.view?.def?.mine) sfx(r.win ? 'capture' : 'hold', true);
     $('#bsSkip').disabled = true;
+    $('#bsPause').disabled = true;
+    $('#bsFast').disabled = true;
     $('#bsRetreat').hidden = true;
     $('#bsTacticMenu').hidden = true;
     $('#bsFloat').hidden = true;
@@ -1382,9 +1388,42 @@
     if (gen === S.gen) closeBattle();
   }
   function closeBattle() {
+    const wasOpen = BV.open || !$('#battleScreen').hidden;
     Object.assign(BV, { open: false, skip: true });
     BV.wake?.();
     $('#battleScreen').hidden = true;
+    if (wasOpen) restoreFocusAfterBattle();
+    else BV.returnFocus = null;
+  }
+  function captureBattleReturnFocus() {
+    const active = document.activeElement;
+    if (!active || active === document.body) return;
+    const screen = $('#battleScreen');
+    if (active === screen) return;
+    if (typeof screen?.contains === 'function') {
+      if (screen.contains(active)) return;
+    } else {
+      for (let n = active.parentElement; n; n = n.parentElement) {
+        if (n === screen) return;
+      }
+    }
+    BV.returnFocus = active;
+  }
+  // 戰鬥結束後把焦點還給開戰前的元件，否則落到地圖，避免停在 body。
+  function restoreFocusAfterBattle() {
+    const saved = BV.returnFocus;
+    BV.returnFocus = null;
+    const map = $('#map');
+    const target = battleReturnFocusUsable(saved) ? saved : map;
+    (target || map)?.focus?.();
+  }
+  function battleReturnFocusUsable(el) {
+    if (!el || el === document.body) return false;
+    if (el.disabled) return false;
+    if (insideHidden(el, null)) return false;
+    if (el.isConnected === false) return false;
+    if (typeof document.contains === 'function' && document.contains(el) === false) return false;
+    return true;
   }
   function renderBattleCtrls() {
     $('#bsPause').textContent = BV.paused ? '▶' : '⏸';
@@ -2171,8 +2210,8 @@
     }
     if (!$('#attackDialog').hidden || !$('#modal').hidden || !$('#designer').hidden || !$('#transfer').hidden || !$('#skillPicker').hidden || e.target.tagName === 'INPUT') return;
     if (hasModifier(e)) return;
-    // Enter 在按鈕上會再觸發一次 click；交給按鈕，避免確認被同一下按鍵跳過。e 仍全域有效。
-    if (e.key === 'e' || (e.key === 'Enter' && e.target.tagName !== 'BUTTON')) requestEndTurn();
+    // Enter 在按鈕上會再觸發一次 click；交給按鈕，避免確認被同一下按鍵跳過。e／E 仍全域有效。
+    if (e.key === 'e' || e.key === 'E' || (e.key === 'Enter' && e.target.tagName !== 'BUTTON')) requestEndTurn();
     if (e.key === 'Escape') { S.sel = null; S.transferMode = false; clearAim(); render(); }
   });
   // 小地圖與縮放
