@@ -283,11 +283,14 @@
   // ───────── 戰鬥 ─────────
   function combatOptions(src, tgt, sent) {
     const fa = S.owner[src], fd = S.owner[tgt];
-    return { sent, defenders: S.army[tgt], units: S.units, counters: COUNTERS,
+    const options = { sent, defenders: S.army[tgt], units: S.units, counters: COUNTERS,
       attackMult: atkMult(fa, src), defenseMult: defMult(fd, tgt),
       defenderAttack: 1 + 0.12 * S.research[fd].atk,
       attackerMoto: byId[src].moto || 1, defenderMoto: byId[tgt].moto || 1,
       adapt: fd === S.player ? 'A' : 'D' }; // AI 那一方每合重新排兵（玩家守城時是攻方 AI，否則守方）
+    // 玩家攻打 AI 時，守方戰術走 Combat.step，觀戰／略過／⚡／預估同一套。
+    if (fa === S.player && fd !== S.player) options.aiTactic = { side: 'D', research: S.research[fd] };
+    return options;
   }
 
   async function doAttack(src, tgt, gen, half = false, deployment = null) {
@@ -308,8 +311,7 @@
       clearArrows();
       r = await playBattle({ title: `${byId[tgt].short}攻防戰`, emblem: emblemOf(tgt), canRetreat: fa === S.player,
         att: { name: byId[src].short, color: byId[fa].color, mine: fa === S.player },
-        def: { name: byId[tgt].short, color: byId[fd].color, mine: fd === S.player },
-        ai: fd === S.player ? null : { side: 'D', research: S.research[fd] } }, options, gen);
+        def: { name: byId[tgt].short, color: byId[fd].color, mine: fd === S.player } }, options, gen);
       if (gen !== S.gen || S.over) return;
       await finishBattle(r, gen);
       if (gen !== S.gen || S.over) return;
@@ -1281,8 +1283,12 @@
     await battleSleep(1400, gen);
     while (!st.done && !BV.retreat && gen === S.gen) {
       if (BV.skip) { while (!st.done) Combat.step(st, options); break; }
-      maybeAiTactic(st);
+      const usedBefore = st.tacticUsed?.D;
       Combat.step(st, options);
+      if (st.tacticUsed?.D && st.tacticUsed.D !== usedBefore && BV.side !== 'D') {
+        const t = TACTICS[st.tacticUsed.D];
+        if (t) shoutTactic(t);
+      }
       BV.step = st.round;
       drawBattle(st.round);
       sfx('attack');
@@ -1369,13 +1375,6 @@
     renderTacticBtn();
     drawBattle(BV.step, null, true);
     return true;
-  }
-  // 玩家觀戰時，守方 AI 可以在兵力掉到一半以下用一次戰術。略過與 ⚡ 不走這裡。
-  function maybeAiTactic(st) {
-    const ai = BV.view?.ai;
-    if (!ai || ai.side !== 'D') return;
-    const key = Combat.aiTactic(st, ai.research);
-    if (key && TACTICS[key]) shoutTactic(TACTICS[key]);
   }
   // 換排：把選取的我方那一排往前（靠城牆，delta = -1）或往後移，和相鄰那排對調
   function moveRow(delta) {

@@ -135,6 +135,8 @@ const Combat = (() => {
   }
   function step(st, o, random = Math.random) {
     if (st.done) return st;
+    // 守方 AI 戰術在傷害計算前發動，不消耗亂數；觀戰／略過／resolve／estimate 結果相同。
+    if (o.aiTactic?.side === 'D') aiTactic(st, o.aiTactic.research);
     let toD = laneDamage(o, st.A, st.laneA, st.aimA, st.D, st.laneD, o.attackMult / o.defenseMult, o.attackerMoto ?? 1, random);
     let toA = laneDamage(o, st.D, st.laneD, st.aimD, st.A, st.laneA, o.defenderAttack, o.defenderMoto ?? 1, random);
     if (st.buff && st.silence) {

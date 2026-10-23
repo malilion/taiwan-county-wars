@@ -57,7 +57,7 @@ function fixture() {
   }`, context);
   let source = fs.readFileSync('js/game.js', 'utf8');
   const at = source.lastIndexOf('})();');
-  source = source.slice(0, at) + `Object.assign(harness, { S, initState, runLoop, endPlayerTurn, requestEndTurn, doAttack, saveCheckpoint, loadCheckpoint, saveRules, render, buildFacility, produceBuildings, income, defMult, openAttack, showStart, newGame, recruit, confirmTransfer, changeTransfer, freshArmy, reachable, checkEnd, startInvasion, doExpedition, invasionRaid, expeditionAllowed, borderThreat, setPosture, atkMult, aiTurn, BV, startAim, aimAt, pickedArmy, nextTurn, openSkillPicker, useSkill, aiUseSkills });` + source.slice(at);
+  source = source.slice(0, at) + `Object.assign(harness, { S, initState, runLoop, endPlayerTurn, requestEndTurn, doAttack, saveCheckpoint, loadCheckpoint, saveRules, render, buildFacility, produceBuildings, income, defMult, openAttack, showStart, newGame, recruit, confirmTransfer, changeTransfer, freshArmy, reachable, checkEnd, startInvasion, doExpedition, invasionRaid, expeditionAllowed, borderThreat, setPosture, atkMult, aiTurn, BV, startAim, aimAt, pickedArmy, nextTurn, openSkillPicker, useSkill, aiUseSkills, combatOptions });` + source.slice(at);
   vm.runInContext(source, context);
   const h = context.harness;
   h.initState('play', 'taipei');
@@ -502,6 +502,70 @@ test('the hourglass counts down, then a stalled defence sends the attacker home'
   assert.match(get('#bsStamp').innerHTML, /時間到・守住！/);
   assert.match(get('#bsStamp').className, /\bhold\b/);
   assert.ok(get('#log').children.some(c => c.innerHTML.includes('時間到') && c.innerHTML.includes('守住了')));
+});
+function mulberry32(a) {
+  return function () {
+    a |= 0; a = a + 0x6D2B79F5 | 0;
+    let t = Math.imul(a ^ a >>> 15, 1 | a);
+    t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t;
+    return ((t ^ t >>> 14) >>> 0) / 4294967296;
+  };
+}
+test('AI defender tactics in Combat.step match watched, skip and resolve with the same seed', () => {
+  const o = { ...options({ inf: 24 }, { inf: 24 }), aiTactic: { side: 'D', research: { def: 0 } } };
+  const seed = 20261023;
+  const watched = Combat.setup(o);
+  const rndWatch = mulberry32(seed);
+  while (!watched.done) Combat.step(watched, o, rndWatch);
+  const watchedResult = Combat.finish(watched);
+  const resolved = Combat.resolve(o, mulberry32(seed));
+  assert.equal(watchedResult.win, resolved.win);
+  assert.deepEqual(watchedResult.A, resolved.A);
+  assert.deepEqual(watchedResult.D, resolved.D);
+  assert.equal(watchedResult.rounds.length, resolved.rounds.length);
+  assert.equal(watchedResult.lostA, resolved.lostA);
+  assert.equal(watchedResult.lostD, resolved.lostD);
+  assert.ok(watched.tacticUsed.D, 'the AI tactic fires on the watched path');
+  const skip = Combat.setup(o);
+  const rndSkip = mulberry32(seed);
+  Combat.step(skip, o, rndSkip);
+  Combat.step(skip, o, rndSkip);
+  Combat.step(skip, o, rndSkip);
+  while (!skip.done) Combat.step(skip, o, rndSkip);
+  const skipResult = Combat.finish(skip);
+  assert.equal(skipResult.win, resolved.win);
+  assert.deepEqual(skipResult.A, resolved.A);
+  assert.deepEqual(skipResult.D, resolved.D);
+  assert.equal(skipResult.rounds.length, resolved.rounds.length);
+  assert.equal(skip.tacticUsed.D, watched.tacticUsed.D);
+});
+test('the pre-battle estimate counts the AI tactic and a fight without aiTactic is unchanged', () => {
+  const base = options({ inf: 24 }, { inf: 24 });
+  const withAi = { ...base, aiTactic: { side: 'D', research: { def: 0 } } };
+  const plain = Combat.estimate(base);
+  const counted = Combat.estimate(withAi);
+  assert.ok(counted.chance <= plain.chance, 'the defender tactic should not raise the attacker\'s chance');
+  const st = Combat.setup(withAi);
+  const rnd = mulberry32(7);
+  while (!st.done) Combat.step(st, withAi, rnd);
+  assert.ok(st.tacticUsed.D, 'the AI tactic actually triggers in resolve/step');
+  const bare = Combat.setup(base);
+  while (!bare.done) Combat.step(bare, base, () => 0.5);
+  assert.equal(bare.tacticUsed.D, undefined);
+  assert.equal(bare.tacticUsed.A, undefined);
+});
+test('combatOptions only attaches the AI tactic when the player attacks an AI county', () => {
+  const { h, get } = fixture();
+  h.S.army.taipei = { inf: 25 };
+  h.S.army.newtaipei = { inf: 24 };
+  const attack = h.combatOptions('taipei', 'newtaipei', { inf: 24 });
+  assert.equal(attack.aiTactic.side, 'D');
+  assert.equal(attack.aiTactic.research, h.S.research.newtaipei);
+  assert.equal(h.combatOptions('newtaipei', 'taipei', { inf: 5 }).aiTactic, undefined);
+  assert.equal(h.combatOptions('yilan', 'hualien', { inf: 5 }).aiTactic, undefined);
+  h.openAttack('taipei', 'newtaipei');
+  const shown = get('#attackEstimate').textContent;
+  assert.match(shown, new RegExp(`${Combat.estimate(attack).chance}%`));
 });
 test('a watched AI defender spends one tactic once its numbers fall below half', async () => {
   const f = fixture(), { h } = f;
