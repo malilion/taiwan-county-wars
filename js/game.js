@@ -80,12 +80,15 @@
     try { Sfx.play(name); } catch { /* 音效失敗就略過 */ }
   }
   function syncSfxBtn() {
-    const btn = $('#sfxBtn');
     const off = typeof Sfx === 'undefined' || Sfx.muted();
-    btn.textContent = off ? '🔇' : '🔊';
     const label = off ? '音效：關' : '音效：開';
-    btn.title = label;
-    btn.setAttribute('aria-label', label);
+    for (const id of ['sfxBtn', 'sfxBtnStart']) {
+      const btn = $('#' + id);
+      if (!btn) continue;
+      btn.textContent = off ? '🔇' : '🔊';
+      btn.title = label;
+      btn.setAttribute('aria-label', label);
+    }
   }
   function toggleSfx() {
     if (typeof Sfx === 'undefined') return;
@@ -1948,6 +1951,7 @@
   });
   $('#endTurn').addEventListener('click', requestEndTurn);
   $('#sfxBtn').addEventListener('click', toggleSfx);
+  $('#sfxBtnStart').addEventListener('click', toggleSfx);
   $('#pauseBtn').addEventListener('click', () => { S.paused = !S.paused; renderPanel(); });
   $('#speed').addEventListener('click', e => {
     const b = e.target.closest('button');
@@ -1977,9 +1981,11 @@
     if ((e.key === 'm' || e.key === 'M') && !e.repeat) {
       const tag = e.target?.tagName;
       const typing = tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || e.target?.isContentEditable;
-      const dialog = !$('#attackDialog').hidden || !$('#modal').hidden || !$('#designer').hidden || !$('#transfer').hidden || !$('#skillPicker').hidden;
-      // 戰鬥畫面沒有用到 m，對話框與文字欄位有焦點時不搶快捷鍵
-      if (!typing && !dialog) { e.preventDefault(); toggleSfx(); }
+      const startScreen = !$('#modal').hidden && !$('#startView').hidden;
+      const blockingDialog = !$('#attackDialog').hidden || !$('#designer').hidden || !$('#transfer').hidden || !$('#skillPicker').hidden
+        || (!$('#modal').hidden && !startScreen);
+      // 開始畫面可切音效；出征／調兵／組建／技能視窗與結束畫面不搶 M
+      if (!typing && !blockingDialog) { e.preventDefault(); toggleSfx(); }
     }
     if (e.key === 'Tab' && !$('#attackDialog').hidden) {
       const controls = [...$('#attackDialog').querySelectorAll('button:not(:disabled)')];
