@@ -1457,15 +1457,68 @@ test('space during a defence hold focuses the battle screen and resumes without 
   assert.equal(get('#battleScreen').hidden, true);
   assert.ok(h.S.lastBattle);
 });
-test('a player attack battle keeps focus on the skip button', async () => {
+test('a player attack battle keeps focus on the battle screen', async () => {
   const f = fixture(), { h, get } = f;
   h.S.army.taipei = { inf: 10 }; h.S.army.newtaipei = { inf: 5 };
   const attack = h.doAttack('taipei', 'newtaipei', h.S.gen, false, { inf: 4 });
   await untilStep(f, 0);
   assert.equal(h.BV.holding, false);
   assert.equal(get('#bsHold').hidden, true);
-  assert.equal(f.focused, get('#bsSkip'));
+  assert.equal(f.focused, get('#battleScreen'));
+  assert.notEqual(f.focused, get('#bsSkip'));
   await f.flush(); await attack;
+});
+test('space pauses a running attack even if a button is focused; S skips', async () => {
+  const f = fixture(), { h, get } = f;
+  h.S.army.taipei = { inf: 10 }; h.S.army.newtaipei = { inf: 5 };
+  const attack = h.doAttack('taipei', 'newtaipei', h.S.gen, false, { inf: 4 });
+  await untilStep(f, 0);
+  assert.equal(get('#bsDone').hidden, true);
+  assert.equal(h.BV.paused, false);
+  assert.equal(h.BV.skip, false);
+  const down = (key, extra = {}) => {
+    let prevented = false;
+    f.listeners.keydown.at(-1)({
+      key,
+      repeat: !!extra.repeat,
+      preventDefault() { prevented = true; },
+      target: extra.target || { tagName: 'BUTTON' },
+    });
+    return prevented;
+  };
+  const up = target => {
+    let prevented = false;
+    f.listeners.keyup.at(-1)({ key: ' ', preventDefault() { prevented = true; }, target });
+    return prevented;
+  };
+  assert.equal(down(' ', { repeat: true }), true);
+  assert.equal(h.BV.paused, false, 'auto-repeat does not toggle pause');
+  assert.equal(h.BV.skip, false);
+  assert.equal(down(' '), true);
+  assert.equal(h.BV.paused, true);
+  assert.equal(h.BV.skip, false);
+  assert.equal(down(' '), true);
+  assert.equal(h.BV.paused, false);
+  assert.equal(h.BV.skip, false);
+  assert.equal(down(' ', { repeat: true }), true);
+  assert.equal(h.BV.paused, false, 'auto-repeat does not resume either');
+  assert.equal(up({ tagName: 'BUTTON' }), true);
+  assert.equal(h.BV.paused, false, 'keyup only cancels the native click');
+  const menuBtn = { tagName: 'BUTTON', closest: sel => sel === '#bsTacticMenu' ? {} : null };
+  assert.equal(up(menuBtn), false);
+  get('#bsTacticMenu').hidden = false;
+  assert.equal(down(' ', { target: menuBtn }), false);
+  assert.equal(h.BV.paused, false);
+  assert.equal(h.BV.skip, false);
+  get('#bsTacticMenu').hidden = true;
+  assert.equal(down('s'), true);
+  assert.equal(h.BV.skip, true);
+  h.BV.skip = false;
+  assert.equal(down('S'), true);
+  assert.equal(h.BV.skip, true);
+  await f.flush(); await attack;
+  assert.equal(get('#battleScreen').hidden, true);
+  assert.equal(h.BV.open, false);
 });
 test('needsLowChanceConfirm is true at or below 10 percent', () => {
   const { h } = fixture();
