@@ -108,7 +108,7 @@ function fixture() {
   }`, context);
   let source = fs.readFileSync('js/game.js', 'utf8');
   const at = source.lastIndexOf('})();');
-  source = source.slice(0, at) + `Object.assign(harness, { S, initState, runLoop, endPlayerTurn, requestEndTurn, doAttack, saveCheckpoint, loadCheckpoint, saveRules, render, buildFacility, produceBuildings, income, defMult, openAttack, showStart, newGame, recruit, confirmTransfer, changeTransfer, freshArmy, reachable, checkEnd, startInvasion, doExpedition, invasionRaid, expeditionAllowed, borderThreat, setPosture, atkMult, aiTurn, BV, startAim, aimAt, pickedArmy, nextTurn, openSkillPicker, useSkill, aiUseSkills, combatOptions, defenceHoldMs, needsLowChanceConfirm, LOW_CHANCE, trapFocusTarget, battleFocusables, castTactic, keepBattleFocus });` + source.slice(at);
+  source = source.slice(0, at) + `Object.assign(harness, { S, initState, runLoop, endPlayerTurn, requestEndTurn, doAttack, saveCheckpoint, loadCheckpoint, saveRules, render, buildFacility, produceBuildings, income, defMult, openAttack, showStart, newGame, recruit, confirmTransfer, changeTransfer, freshArmy, reachable, checkEnd, startInvasion, doExpedition, invasionRaid, expeditionAllowed, borderThreat, setPosture, atkMult, aiTurn, BV, startAim, aimAt, pickedArmy, nextTurn, openSkillPicker, useSkill, aiUseSkills, combatOptions, defenceHoldMs, needsLowChanceConfirm, LOW_CHANCE, trapFocusTarget, battleFocusables, castTactic, keepBattleFocus, restoreFocusAfterBattle, captureBattleReturnFocus, closeBattle });` + source.slice(at);
   vm.runInContext(source, context);
   const h = context.harness;
   h.initState('play', 'taipei');
@@ -1521,6 +1521,87 @@ test('a player attack battle keeps focus on the battle screen', async () => {
   assert.equal(f.focused, get('#battleScreen'));
   assert.notEqual(f.focused, get('#bsSkip'));
   await f.flush(); await attack;
+});
+async function skipThenCloseBattle(f) {
+  f.get('#bsSkip').handlers.click();
+  for (let i = 0; i < 50 && f.get('#bsDone').hidden; i++) await Promise.resolve();
+  if (!f.get('#bsDone').hidden) f.get('#bsDone').handlers.click();
+  await f.flush();
+}
+test('closing the battle screen returns focus to the element focused before the battle, or the map', async () => {
+  {
+    const f = fixture(), { h, get } = f;
+    const endTurn = get('#endTurn');
+    endTurn.hidden = false;
+    endTurn.disabled = false;
+    endTurn.focus();
+    h.S.army.taipei = { inf: 10 }; h.S.army.newtaipei = { inf: 2 };
+    const battle = h.doAttack('taipei', 'newtaipei', h.S.gen, false, { inf: 9 });
+    await untilStep(f, 0);
+    assert.equal(h.BV.returnFocus, endTurn);
+    await skipThenCloseBattle(f); await battle;
+    assert.equal(get('#battleScreen').hidden, true);
+    assert.equal(f.focused, endTurn);
+    assert.equal(f.context.document.activeElement, endTurn);
+    assert.notEqual(f.focused, f.context.document.body);
+    assert.equal(h.BV.returnFocus, null);
+  }
+  {
+    const f = fixture(), { h, get } = f;
+    const endTurn = get('#endTurn');
+    endTurn.hidden = false;
+    endTurn.disabled = false;
+    endTurn.focus();
+    h.S.army.taipei = { inf: 10 }; h.S.army.newtaipei = { inf: 2 };
+    const battle = h.doAttack('taipei', 'newtaipei', h.S.gen, false, { inf: 9 });
+    await untilStep(f, 0);
+    endTurn.disabled = true;
+    await skipThenCloseBattle(f); await battle;
+    assert.equal(f.focused, get('#map'));
+    assert.equal(f.context.document.activeElement, get('#map'));
+    assert.notEqual(f.focused, f.context.document.body);
+    assert.notEqual(f.context.document.activeElement, f.context.document.body);
+    assert.equal(h.BV.returnFocus, null);
+  }
+  {
+    const f = fixture(), { h, get } = f;
+    const dlg = get('#attackDialog'), btn = get('#endTurn');
+    btn.hidden = false;
+    dlg.hidden = false;
+    dlg.appendChild(btn);
+    btn.focus();
+    h.S.army.taipei = { inf: 10 }; h.S.army.newtaipei = { inf: 2 };
+    const battle = h.doAttack('taipei', 'newtaipei', h.S.gen, false, { inf: 9 });
+    await untilStep(f, 0);
+    dlg.hidden = true;
+    await skipThenCloseBattle(f); await battle;
+    assert.equal(f.focused, get('#map'));
+    assert.notEqual(f.focused, f.context.document.body);
+  }
+  {
+    const f = fixture(), { h, get } = f;
+    const body = { id: 'body', tagName: 'BODY' };
+    f.context.document.body = body;
+    f.context.document.activeElement = body;
+    h.S.army.taipei = { inf: 10 }; h.S.army.newtaipei = { inf: 2 };
+    const battle = h.doAttack('taipei', 'newtaipei', h.S.gen, false, { inf: 9 });
+    await untilStep(f, 0);
+    assert.equal(h.BV.returnFocus, null);
+    await skipThenCloseBattle(f); await battle;
+    assert.equal(f.focused, get('#map'));
+    assert.notEqual(f.focused, body);
+    assert.notEqual(f.context.document.activeElement, body);
+  }
+  {
+    const f = fixture(), { h, get } = f;
+    const btn = get('#newBtn');
+    btn.focus();
+    h.BV.returnFocus = get('#endTurn');
+    h.closeBattle();
+    assert.equal(f.focused, btn);
+    assert.equal(f.context.document.activeElement, btn);
+    assert.equal(h.BV.returnFocus, null);
+  }
 });
 test('space pauses a running attack when no button is focused; a focused button keeps native Space; S skips', async () => {
   const f = fixture(), { h, get } = f;
