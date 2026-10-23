@@ -1866,6 +1866,50 @@ test('modifier+E/Enter/Escape do not end the turn or confirm or cancel an attack
   assert.equal(get('#attackDialog').hidden, false);
   assert.ok(h.S.attack);
 });
+test('Shift+E ends the turn like e; Ctrl/Meta/Alt+E (with or without Shift) still do nothing', () => {
+  const f = fixture(), { h, get } = f;
+  get('#modal').hidden = true;
+  h.render();
+  const btn = get('#endTurn');
+  const label = btn.textContent;
+  const down = (key, extra = {}) => {
+    let prevented = false;
+    f.listeners.keydown.at(-1)({
+      key,
+      ctrlKey: !!extra.ctrlKey, metaKey: !!extra.metaKey, altKey: !!extra.altKey,
+      shiftKey: !!extra.shiftKey,
+      preventDefault() { prevented = true; },
+      target: extra.target || { tagName: 'DIV' },
+    });
+    return prevented;
+  };
+  const blocked = [
+    { ctrlKey: true },
+    { metaKey: true },
+    { altKey: true },
+    { ctrlKey: true, shiftKey: true },
+    { metaKey: true, shiftKey: true },
+    { altKey: true, shiftKey: true },
+  ];
+  for (const extra of blocked) assert.equal(down('E', extra), false);
+  assert.equal(h.S.current, 'taipei');
+  assert.equal(btn.textContent, label);
+  assert.equal(btn.classList.contains('confirming'), false);
+
+  assert.equal(down('E', { shiftKey: true }), false);
+  assert.equal(h.S.current, 'taipei');
+  assert.equal(btn.textContent, '還有 1 個縣市可出征，確定結束？');
+  assert.equal(btn.classList.contains('confirming'), true);
+
+  for (const extra of blocked) assert.equal(down('E', extra), false);
+  assert.equal(h.S.current, 'taipei');
+  assert.equal(btn.textContent, '還有 1 個縣市可出征，確定結束？');
+  assert.equal(btn.classList.contains('confirming'), true);
+
+  down('E', { shiftKey: true });
+  assert.notEqual(h.S.current, 'taipei');
+  assert.equal(btn.classList.contains('confirming'), false);
+});
 test('trapFocusTarget wraps the ends and leaves the middle to the browser', () => {
   const { h } = fixture();
   const first = { id: 'first' }, mid = { id: 'mid' }, last = { id: 'last' };
