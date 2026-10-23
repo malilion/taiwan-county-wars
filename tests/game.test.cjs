@@ -1805,6 +1805,10 @@ test('space pauses a running attack when no button is focused; a focused button 
   assert.equal(down(' ', { target: { tagName: 'BUTTON' } }), false);
   assert.equal(h.BV.paused, false);
   assert.equal(h.BV.skip, false);
+  assert.equal(down('Enter', { target: { tagName: 'DIV' } }), false);
+  assert.equal(h.BV.skip, false, 'Enter does not continue a battle that is still running');
+  assert.equal(down('Enter', { target: { tagName: 'BUTTON' } }), false);
+  assert.equal(h.BV.skip, false);
   get('#bsSkip').handlers.click();
   assert.equal(h.BV.skip, true);
   h.BV.skip = false;
@@ -1817,9 +1821,10 @@ test('space pauses a running attack when no button is focused; a focused button 
   assert.equal(get('#battleScreen').hidden, true);
   assert.equal(h.BV.open, false);
 });
-test('a battle that ends while paused resets ⏸, auto-closes, and the next battle on the same page re-enables ⏸ ⏩', async () => {
-  const f = fixture(), { h, get } = f;
-  h.S.army.taipei = { inf: 10 }; h.S.army.newtaipei = { inf: 2 };
+async function openPausedResult(f) {
+  const { h, get } = f;
+  h.S.army.taipei = { inf: 10 };
+  h.S.army.newtaipei = { inf: 2 };
   const battle = h.doAttack('taipei', 'newtaipei', h.S.gen, false, { inf: 9 });
   await untilStep(f, 0);
   get('#bsPause').handlers.click();
@@ -1829,18 +1834,83 @@ test('a battle that ends while paused resets ⏸, auto-closes, and the next batt
   f.listeners.keydown.at(-1)({ key: 's', repeat: false, preventDefault() {}, target: { tagName: 'DIV' } });
   for (let i = 0; i < 50 && get('#bsDone').hidden; i++) await Promise.resolve();
   assert.equal(get('#bsDone').hidden, false);
+  assert.equal(get('#battleScreen').hidden, false);
+  assert.equal(h.BV.open, true);
   assert.equal(h.BV.paused, false);
+  assert.equal(h.BV.endedPaused, true);
   assert.equal(get('#bsPause').textContent, '⏸');
   assert.equal(get('#bsPause').getAttribute('aria-label'), '暫停戰鬥');
   assert.equal(get('#bsPause').disabled, true);
   assert.equal(get('#bsFast').disabled, true);
-  f.listeners.keydown.at(-1)({ key: ' ', repeat: false, preventDefault() {}, target: { tagName: 'DIV' } });
-  assert.equal(h.BV.paused, false);
+  assert.equal(f.focused, get('#bsDone'));
+  assert.equal(f.context.document.activeElement, get('#bsDone'));
+  // Return a plain object so await does not unwrap the still-open battle promise.
+  return { battle };
+}
+// Two full flushes are far past the 2400ms auto-close, and past the 200ms poll.
+async function assertPausedResultStaysOpen(f) {
+  await f.flush();
+  await f.flush();
+  assert.equal(f.get('#battleScreen').hidden, false);
+  assert.equal(f.get('#bsDone').hidden, false);
+  assert.equal(f.h.BV.open, true);
+  assert.equal(f.focused, f.get('#bsDone'));
+  assert.equal(f.context.document.activeElement, f.get('#bsDone'));
+}
+function pressBattleKey(f, key, extra = {}) {
+  let prevented = false;
+  f.listeners.keydown.at(-1)({
+    key,
+    repeat: !!extra.repeat,
+    ctrlKey: !!extra.ctrlKey,
+    metaKey: !!extra.metaKey,
+    altKey: !!extra.altKey,
+    preventDefault() { prevented = true; },
+    target: extra.target || f.get('#battleScreen'),
+  });
+  return prevented;
+}
+function prepareBattleReturnFocus(f) {
+  const endTurn = f.get('#endTurn');
+  endTurn.hidden = false;
+  endTurn.disabled = false;
+  endTurn.focus();
+  return endTurn;
+}
+function assertBattleFocusRestored(f, endTurn, usable, label) {
+  const expected = usable ? endTurn : f.get('#map');
+  assert.equal(f.get('#battleScreen').hidden, true, label);
+  assert.equal(f.focused, expected, label);
+  assert.equal(f.context.document.activeElement, expected, label);
+  assert.notEqual(f.focused, f.context.document.body, label);
+  assert.notEqual(f.context.document.activeElement, f.context.document.body, label);
+  assert.equal(f.h.BV.returnFocus, null, label);
+}
+test('a battle that ends while paused resets ⏸, stays open past the auto-close timer, and the next battle re-enables ⏸ ⏩', async () => {
+  const f = fixture(), { h, get } = f;
+  const endTurn = prepareBattleReturnFocus(f);
+  const { battle } = await openPausedResult(f);
+  assert.equal(h.BV.returnFocus, endTurn);
+  get('#bsPause').handlers.click();
+  assert.equal(h.BV.paused, false, 'pause cannot toggle once the battle is done');
   assert.equal(get('#bsPause').textContent, '⏸');
   assert.equal(get('#bsPause').getAttribute('aria-label'), '暫停戰鬥');
+  assert.equal(pressBattleKey(f, ' ', { target: get('#bsDone') }), false);
+  assert.equal(pressBattleKey(f, 'Enter', { target: get('#bsDone') }), false);
+  assert.equal(h.BV.skip, false, 'Enter or Space on 繼續 stays a native button press');
+  assert.equal(h.BV.paused, false);
+  for (const key of [' ', 'Enter']) {
+    for (const mod of ['ctrlKey', 'metaKey', 'altKey']) {
+      assert.equal(pressBattleKey(f, key, { [mod]: true }), false, `${mod}+${key} does not continue`);
+      assert.equal(h.BV.skip, false);
+      assert.equal(h.BV.paused, false);
+    }
+  }
+  await assertPausedResultStaysOpen(f);
+  get('#bsDone').handlers.click();
   await f.flush();
+  assertBattleFocusRestored(f, endTurn, true, '繼續');
   await battle;
-  assert.equal(get('#battleScreen').hidden, true);
   h.S.over = false;
   h.S.owner.newtaipei = 'newtaipei';
   h.S.army.taipei = { inf: 10 };
@@ -1853,7 +1923,9 @@ test('a battle that ends while paused resets ⏸, auto-closes, and the next batt
   assert.equal(get('#bsPause').disabled, false);
   assert.equal(get('#bsFast').disabled, false);
   assert.equal(h.BV.paused, false);
+  assert.equal(h.BV.endedPaused, false);
   assert.equal(get('#bsPause').textContent, '⏸');
+  assert.equal(get('#bsPause').getAttribute('aria-label'), '暫停戰鬥');
   get('#bsPause').handlers.click();
   assert.equal(h.BV.paused, true);
   assert.equal(get('#bsPause').textContent, '▶');
@@ -1862,6 +1934,59 @@ test('a battle that ends while paused resets ⏸, auto-closes, and the next batt
   assert.equal(get('#bsPause').textContent, '⏸');
   await f.flush();
   await again;
+});
+test('a paused battle result closes from 繼續, Escape, Enter, or Space and restores focus', async () => {
+  const paths = [
+    ['繼續', f => { f.get('#bsDone').handlers.click(); }],
+    ['Escape', f => { pressBattleKey(f, 'Escape'); }],
+    ['Enter', f => { assert.equal(pressBattleKey(f, 'Enter'), true); }],
+    ['Space', f => { assert.equal(pressBattleKey(f, ' '), true); }],
+  ];
+  for (const [name, close] of paths) {
+    for (const usable of [true, false]) {
+      const f = fixture(), { h } = f;
+      const endTurn = prepareBattleReturnFocus(f);
+      const { battle } = await openPausedResult(f);
+      assert.equal(h.BV.returnFocus, endTurn, name);
+      if (!usable) endTurn.disabled = true;
+      await assertPausedResultStaysOpen(f);
+      close(f);
+      await f.flush();
+      assertBattleFocusRestored(f, endTurn, usable, `${name} usable=${usable}`);
+      await battle;
+    }
+  }
+});
+test('a battle that ends without pause still auto-closes after the timer', async () => {
+  const f = fixture(), { h, get } = f;
+  h.S.army.taipei = { inf: 10 };
+  h.S.army.newtaipei = { inf: 2 };
+  const battle = h.doAttack('taipei', 'newtaipei', h.S.gen, false, { inf: 9 });
+  await untilStep(f, 0);
+  assert.equal(h.BV.paused, false);
+  f.listeners.keydown.at(-1)({ key: 's', repeat: false, preventDefault() {}, target: { tagName: 'DIV' } });
+  for (let i = 0; i < 50 && get('#bsDone').hidden; i++) await Promise.resolve();
+  assert.equal(get('#bsDone').hidden, false);
+  assert.equal(h.BV.endedPaused, false);
+  assert.equal(h.BV.paused, false);
+  assert.equal(get('#battleScreen').hidden, false);
+  assert.equal(f.focused, get('#bsDone'));
+  await f.flush();
+  await battle;
+  assert.equal(get('#battleScreen').hidden, true);
+  assert.equal(h.BV.open, false);
+});
+test('a paused battle result stops waiting when the battle generation changes', async () => {
+  const f = fixture(), { h, get } = f;
+  const { battle } = await openPausedResult(f);
+  const generation = h.S.gen;
+  h.S.gen++;
+  h.closeBattle();
+  await f.flush();
+  await battle;
+  assert.equal(h.S.gen, generation + 1);
+  assert.equal(get('#battleScreen').hidden, true);
+  assert.equal(h.BV.open, false);
 });
 test('modifier+S/Esc/Space do not skip or pause a running battle', async () => {
   const f = fixture(), { h, get } = f;
