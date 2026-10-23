@@ -31,6 +31,7 @@ button {
 button:hover:not(:disabled) { border-color: var(--accent); }
 button:disabled { opacity: .45; cursor: default; }
 button.primary { background: #e85d04; border-color: #ff8c42; font-weight: 700; }
+button.danger { background: #9b2226; border-color: #ef476f; font-weight: 700; }
 button.wide { width: 100%; margin-top: 10px; padding: 10px; }
 
 #top {
@@ -437,6 +438,8 @@ button:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
 .attackPresets button { flex: 1 0 25%; }
 .reserveWarning { padding: 10px; border-radius: 8px; background: #183746; color: #a9d5dc; font-size: 12px; line-height: 1.7; }
 .reserveWarning.danger { background: #402433; color: #ffadc0; border: 1px solid #834159; }
+.lowChanceWarning { margin: 10px 0 0; padding: 10px; border-radius: 8px; background: #402433; color: #ffadc0; border: 1px solid #834159; font-size: 13px; font-weight: 700; line-height: 1.6; }
+.lowChanceWarning[hidden] { display: none; }
 .defenseBox { padding: 12px; margin-top: 12px; border: 1px solid var(--line); border-radius: 10px; }
 .defenseHead { display: flex; align-items: center; justify-content: space-between; gap: 8px; font-size: 12px; }
 .defenseBox p { margin: 6px 0; font-size: 12px; }
