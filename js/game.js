@@ -1372,6 +1372,9 @@
     $('#bsStamp').innerHTML = `<b>${text}</b><small>攻方折損 ${r.lostA} 人・守方折損 ${r.lostD} 人</small>`;
     $('#bsStamp').hidden = false;
     if (BV.view?.att?.mine || BV.view?.def?.mine) sfx(r.win ? 'capture' : 'hold', true);
+    // 戰果畫面不再暫停，否則 battleSleep 會一直等，⏸ 也會停在 ▶。
+    BV.paused = false;
+    renderBattleCtrls();
     $('#bsSkip').disabled = true;
     $('#bsPause').disabled = true;
     $('#bsFast').disabled = true;
@@ -1516,6 +1519,7 @@
   function skipBattle() { BV.skip = true; endDefenceHold(); BV.wake?.(); }
   function toggleBattlePause() {
     if (BV.holding) { endDefenceHold(); return; }
+    if (BV.st?.done || !$('#bsDone').hidden) return;
     BV.paused = !BV.paused; renderBattleCtrls();
   }
   $('#bsSkip').addEventListener('click', skipBattle);

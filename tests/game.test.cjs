@@ -14,6 +14,7 @@ function fixture() {
       this.parentElement = null;
       this.id = typeof id === 'string' ? id.replace(/^#/, '') : '';
       this.tagName = buttonIds.has(this.id) ? 'BUTTON' : 'DIV';
+      this.attributes = {};
       const classes = new Set();
       this.classList = {
         add: (...names) => { for (const name of names) classes.add(name); },
@@ -81,7 +82,8 @@ function fixture() {
       while (n) { if (n.matches?.(selector)) return n; n = n.parentElement; }
       return null;
     }
-    setAttribute() {}
+    setAttribute(name, value) { this.attributes[name] = String(value); }
+    getAttribute(name) { return Object.prototype.hasOwnProperty.call(this.attributes, name) ? this.attributes[name] : null; }
     focus() { focus.el = this; if (focus.doc) focus.doc.activeElement = this; }
   }
   const knownIds = new Set([...fs.readFileSync('index.html', 'utf8').matchAll(/id="([^"]+)"/g)].map(m => '#' + m[1]));
@@ -1814,6 +1816,52 @@ test('space pauses a running attack when no button is focused; a focused button 
   await f.flush(); await attack;
   assert.equal(get('#battleScreen').hidden, true);
   assert.equal(h.BV.open, false);
+});
+test('a battle that ends while paused resets ⏸, auto-closes, and the next battle on the same page re-enables ⏸ ⏩', async () => {
+  const f = fixture(), { h, get } = f;
+  h.S.army.taipei = { inf: 10 }; h.S.army.newtaipei = { inf: 2 };
+  const battle = h.doAttack('taipei', 'newtaipei', h.S.gen, false, { inf: 9 });
+  await untilStep(f, 0);
+  get('#bsPause').handlers.click();
+  assert.equal(h.BV.paused, true);
+  assert.equal(get('#bsPause').textContent, '▶');
+  assert.equal(get('#bsPause').getAttribute('aria-label'), '繼續戰鬥');
+  f.listeners.keydown.at(-1)({ key: 's', repeat: false, preventDefault() {}, target: { tagName: 'DIV' } });
+  for (let i = 0; i < 50 && get('#bsDone').hidden; i++) await Promise.resolve();
+  assert.equal(get('#bsDone').hidden, false);
+  assert.equal(h.BV.paused, false);
+  assert.equal(get('#bsPause').textContent, '⏸');
+  assert.equal(get('#bsPause').getAttribute('aria-label'), '暫停戰鬥');
+  assert.equal(get('#bsPause').disabled, true);
+  assert.equal(get('#bsFast').disabled, true);
+  f.listeners.keydown.at(-1)({ key: ' ', repeat: false, preventDefault() {}, target: { tagName: 'DIV' } });
+  assert.equal(h.BV.paused, false);
+  assert.equal(get('#bsPause').textContent, '⏸');
+  assert.equal(get('#bsPause').getAttribute('aria-label'), '暫停戰鬥');
+  await f.flush();
+  await battle;
+  assert.equal(get('#battleScreen').hidden, true);
+  h.S.over = false;
+  h.S.owner.newtaipei = 'newtaipei';
+  h.S.army.taipei = { inf: 10 };
+  h.S.army.newtaipei = { inf: 5 };
+  h.S.acted.delete('taipei');
+  delete h.S.moved.taipei;
+  delete h.S.moved.newtaipei;
+  const again = h.doAttack('taipei', 'newtaipei', h.S.gen, false, { inf: 4 });
+  await untilStep(f, 0);
+  assert.equal(get('#bsPause').disabled, false);
+  assert.equal(get('#bsFast').disabled, false);
+  assert.equal(h.BV.paused, false);
+  assert.equal(get('#bsPause').textContent, '⏸');
+  get('#bsPause').handlers.click();
+  assert.equal(h.BV.paused, true);
+  assert.equal(get('#bsPause').textContent, '▶');
+  get('#bsPause').handlers.click();
+  assert.equal(h.BV.paused, false);
+  assert.equal(get('#bsPause').textContent, '⏸');
+  await f.flush();
+  await again;
 });
 test('modifier+S/Esc/Space do not skip or pause a running battle', async () => {
   const f = fixture(), { h, get } = f;
