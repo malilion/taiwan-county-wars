@@ -2041,8 +2041,10 @@
   });
   $('#info').addEventListener('change', e => { if (e.target.id === 'halfChk') { cancelEndTurnConfirm(); S.sendHalf = e.target.checked; renderInfo(); } });
   $('#research').addEventListener('click', e => { const b = e.target.closest('button[data-k]'); if (b) doResearch(b.dataset.k); });
+  // Shift 不算在內：大寫 S／T／M 與 Shift+Tab 仍要有效。
+  const hasModifier = e => !!(e.ctrlKey || e.metaKey || e.altKey);
   document.addEventListener('keydown', e => {
-    if ((e.key === 'm' || e.key === 'M') && !e.repeat) {
+    if ((e.key === 'm' || e.key === 'M') && !e.repeat && !hasModifier(e)) {
       const tag = e.target?.tagName;
       const typing = tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || e.target?.isContentEditable;
       const startScreen = !$('#modal').hidden && !$('#startView').hidden;
@@ -2051,31 +2053,39 @@
       // 開始畫面可切音效；出征／調兵／組建／技能視窗與結束畫面不搶 M
       if (!typing && !blockingDialog) { e.preventDefault(); toggleSfx(); }
     }
-    if (e.key === 'Tab' && !$('#attackDialog').hidden) {
+    if (e.key === 'Tab' && !hasModifier(e) && !$('#attackDialog').hidden) {
       const controls = [...$('#attackDialog').querySelectorAll('button:not(:disabled)')];
       const first = controls[0], last = controls[controls.length - 1];
       if (e.shiftKey && document.activeElement === first) { e.preventDefault(); last.focus(); }
       else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first.focus(); }
     }
-    if (e.key === 'Escape' && !$('#attackDialog').hidden) { $('#attackCancel').click(); return; }
+    if (e.key === 'Escape' && !$('#attackDialog').hidden) {
+      if (hasModifier(e)) return;
+      $('#attackCancel').click();
+      return;
+    }
     if (e.key === 'Enter' && !$('#attackDialog').hidden) {
       // 焦點在任何按鈕上時交給瀏覽器原生 click，避免 ±／預設鍵被當成確認出征。
       if (e.target?.tagName === 'BUTTON') return;
+      if (hasModifier(e)) return;
       e.preventDefault();
       if (!$('#attackConfirm').disabled) $('#attackConfirm').click();
       return;
     }
     if (BV.open) {
-      const mod = e.ctrlKey || e.metaKey || e.altKey;
-      // 按住 Ctrl、Cmd 或 Alt 時，Esc、S、空白留給瀏覽器快捷鍵。
-      if (e.key === 'Escape' && !mod) skipBattle();
-      if ((e.key === 's' || e.key === 'S') && !e.repeat && !mod) { e.preventDefault(); skipBattle(); }
-      if ((e.key === 't' || e.key === 'T') && !e.repeat) { e.preventDefault(); toggleTacticMenu(); }
-      if (e.key === 'ArrowLeft' || e.key === 'ArrowRight') { e.preventDefault(); moveRow(e.key === 'ArrowRight' ? -1 : 1); } // 我方在左：→ 往前
+      // 按住 Ctrl、Cmd 或 Alt 時，戰鬥快捷鍵留給瀏覽器。
+      if (e.key === 'Escape' && !hasModifier(e)) skipBattle();
+      if ((e.key === 's' || e.key === 'S') && !e.repeat && !hasModifier(e)) { e.preventDefault(); skipBattle(); }
+      if ((e.key === 't' || e.key === 'T') && !e.repeat && !hasModifier(e)) { e.preventDefault(); toggleTacticMenu(); }
+      if ((e.key === 'ArrowLeft' || e.key === 'ArrowRight') && !hasModifier(e)) {
+        e.preventDefault();
+        const forward = e.key === 'ArrowRight'; // 我方在左：→ 往前
+        moveRow(forward ? -1 : 1);
+      }
       if (e.key === ' ') {
         // 焦點在按鈕上時，空白鍵交給瀏覽器原生按下。
         if (e.target?.tagName === 'BUTTON') return;
-        if (!mod) {
+        if (!hasModifier(e)) {
           e.preventDefault();
           if (!e.repeat) toggleBattlePause();
         }
@@ -2083,6 +2093,7 @@
       return;
     }
     if (!$('#attackDialog').hidden || !$('#modal').hidden || !$('#designer').hidden || !$('#transfer').hidden || !$('#skillPicker').hidden || e.target.tagName === 'INPUT') return;
+    if (hasModifier(e)) return;
     // Enter 在按鈕上會再觸發一次 click；交給按鈕，避免確認被同一下按鍵跳過。e 仍全域有效。
     if (e.key === 'e' || (e.key === 'Enter' && e.target.tagName !== 'BUTTON')) requestEndTurn();
     if (e.key === 'Escape') { S.sel = null; S.transferMode = false; clearAim(); render(); }
