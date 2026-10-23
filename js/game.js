@@ -1196,10 +1196,34 @@
   const SHOW_PER_ROW = 8; // 一排最多畫 8 個，其餘用數字表示
   // 角色圖大多面向右（或正面）；面向左的列在這裡。戰場上左方面向右、右方面向左，雙方面對面
   const FACE_LEFT = new Set(['assets/units/icons/13-fish.webp']);
-  async function battleSleep(ms, gen) {
-    await new Promise(r => { BV.wake = r; setTimeout(r, ms / S.speed / BV.fast); });
+  async function battleSleep(ms, gen, realtime = false) {
+    await new Promise(r => { BV.wake = r; setTimeout(r, realtime ? ms : ms / S.speed / BV.fast); });
     BV.wake = null;
     while ((BV.paused || S.menuOpen || !$('#bsTacticMenu').hidden) && gen === S.gen && !BV.skip && !BV.retreat) await new Promise(r => setTimeout(r, 120));
+  }
+  function defenceHoldMs(view) {
+    return view && view.def?.mine && !view.att?.mine ? 3000 : 0;
+  }
+  function endDefenceHold() {
+    if (!BV.holding) return;
+    BV.holding = false;
+    BV.wake?.();
+  }
+  async function holdForDefence(view, gen) {
+    const total = defenceHoldMs(view);
+    if (!total || gen !== S.gen) return;
+    BV.holding = true;
+    const el = $('#bsHold');
+    el.hidden = false;
+    let remain = Math.max(1, Math.ceil(total / 1000));
+    while (BV.holding && !BV.skip && !BV.retreat && gen === S.gen && remain > 0) {
+      el.textContent = `🛡️ 守城戰！可先使用 🎴 戰術（${remain} 秒後自動開戰）`;
+      await new Promise(r => { BV.wake = r; setTimeout(r, 1000); });
+      BV.wake = null;
+      remain--;
+    }
+    BV.holding = false;
+    el.hidden = true;
   }
   // 一排（直的）士兵：n = 這合開始時人數，left = 這合結束剩下的人數，dmg = 這排受到的傷害
   function battleCol(k, n, left, dmg, round) {
@@ -1264,7 +1288,7 @@
   // 逐合即時結算，回傳戰果（撤退時取當下兵力）；遊戲被換掉則回傳 null
   async function playBattle(view, options, gen) {
     const st = Combat.setup(options);
-    Object.assign(BV, { open: true, skip: false, retreat: false, paused: false, step: 0, st, opts: options, view,
+    Object.assign(BV, { open: true, skip: false, retreat: false, paused: false, holding: false, step: 0, st, opts: options, view,
       side: view.att.mine ? 'A' : view.def.mine ? 'D' : null, sel: 0 });
     $('#bsTitle').textContent = view.title;
     $('#bsEmblem').innerHTML = view.emblem;
@@ -1280,10 +1304,13 @@
     drawBattle(0);
     $('#bsTacticMenu').hidden = true;
     $('#bsFloat').hidden = true;
+    $('#bsHold').hidden = true;
     renderTacticBtn();
     $('#bsSkip').focus();
     sfx('attack');
-    await battleSleep(1400, gen);
+    await holdForDefence(view, gen);
+    if (gen !== S.gen) return null;
+    if (!BV.skip && !BV.retreat) await battleSleep(1400, gen, defenceHoldMs(view) > 0);
     while (!st.done && !BV.retreat && gen === S.gen) {
       if (BV.skip) { while (!st.done) Combat.step(st, options); break; }
       const usedBefore = st.tacticUsed?.D;
@@ -1314,6 +1341,7 @@
     $('#bsRetreat').hidden = true;
     $('#bsTacticMenu').hidden = true;
     $('#bsFloat').hidden = true;
+    $('#bsHold').hidden = true;
     renderTacticBtn();
     $('#bsDone').hidden = false;
     $('#bsDone').focus();
@@ -1359,6 +1387,7 @@
     menu.hidden = !menu.hidden;
     if (!menu.hidden) fillTacticMenu();
     $('#bsTacticBtn').setAttribute('aria-expanded', menu.hidden ? 'false' : 'true');
+    endDefenceHold();
   }
   function shoutTactic(t) {
     const el = $('#bsFloat');
@@ -1377,6 +1406,7 @@
     $('#bsTacticBtn').setAttribute('aria-expanded', 'false');
     renderTacticBtn();
     drawBattle(BV.step, null, true);
+    endDefenceHold();
     return true;
   }
   // 換排：把選取的我方那一排往前（靠城牆，delta = -1）或往後移，和相鄰那排對調
@@ -1403,8 +1433,11 @@
     drawBattle(BV.step, null, true);
     return true;
   }
-  function skipBattle() { BV.skip = true; BV.wake?.(); }
-  function toggleBattlePause() { BV.paused = !BV.paused; renderBattleCtrls(); }
+  function skipBattle() { BV.skip = true; endDefenceHold(); BV.wake?.(); }
+  function toggleBattlePause() {
+    if (BV.holding) { endDefenceHold(); return; }
+    BV.paused = !BV.paused; renderBattleCtrls();
+  }
   $('#bsSkip').addEventListener('click', skipBattle);
   $('#bsDone').addEventListener('click', skipBattle);
   $('#bsPause').addEventListener('click', toggleBattlePause);

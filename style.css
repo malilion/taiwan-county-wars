@@ -538,6 +538,13 @@ button:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
 .bsMove[hidden] { display: none; }
 .bsMove button { background: var(--accent); color: #0b1426; border: 1px solid var(--accent); border-radius: 999px; font-weight: 900; }
 .bsMove small { color: var(--muted); font-size: 12px; }
+.bsHold {
+  position: absolute; left: 50%; top: 10%; z-index: 3; transform: translateX(-50%);
+  pointer-events: none; text-align: center; white-space: nowrap;
+  background: rgba(11, 20, 38, .92); border: 1px solid var(--accent); border-radius: 10px;
+  padding: 10px 16px; font-weight: 700; font-size: clamp(14px, 2.4vw, 18px); color: var(--accent);
+}
+.bsHold[hidden] { display: none; }
 .bsFloat {
   position: absolute; left: 50%; top: 34%; z-index: 2; transform: translateX(-50%);
   pointer-events: none; font-weight: 900; font-size: clamp(28px, 6vw, 48px); white-space: nowrap;

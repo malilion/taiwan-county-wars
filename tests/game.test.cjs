@@ -57,7 +57,7 @@ function fixture() {
   }`, context);
   let source = fs.readFileSync('js/game.js', 'utf8');
   const at = source.lastIndexOf('})();');
-  source = source.slice(0, at) + `Object.assign(harness, { S, initState, runLoop, endPlayerTurn, requestEndTurn, doAttack, saveCheckpoint, loadCheckpoint, saveRules, render, buildFacility, produceBuildings, income, defMult, openAttack, showStart, newGame, recruit, confirmTransfer, changeTransfer, freshArmy, reachable, checkEnd, startInvasion, doExpedition, invasionRaid, expeditionAllowed, borderThreat, setPosture, atkMult, aiTurn, BV, startAim, aimAt, pickedArmy, nextTurn, openSkillPicker, useSkill, aiUseSkills, combatOptions });` + source.slice(at);
+  source = source.slice(0, at) + `Object.assign(harness, { S, initState, runLoop, endPlayerTurn, requestEndTurn, doAttack, saveCheckpoint, loadCheckpoint, saveRules, render, buildFacility, produceBuildings, income, defMult, openAttack, showStart, newGame, recruit, confirmTransfer, changeTransfer, freshArmy, reachable, checkEnd, startInvasion, doExpedition, invasionRaid, expeditionAllowed, borderThreat, setPosture, atkMult, aiTurn, BV, startAim, aimAt, pickedArmy, nextTurn, openSkillPicker, useSkill, aiUseSkills, combatOptions, defenceHoldMs });` + source.slice(at);
   vm.runInContext(source, context);
   const h = context.harness;
   h.initState('play', 'taipei');
@@ -1416,6 +1416,25 @@ test('the start screen can toggle mute with the in-dialog button and the M key',
   assert.equal(muted, false, 'M stays quiet while typing');
   press('m');
   assert.equal(muted, true);
+});
+test('player-defence battles hold 3 seconds before the first round; attacks do not', () => {
+  const { h } = fixture();
+  assert.equal(h.defenceHoldMs({ att: { mine: true }, def: { mine: false } }), 0);
+  assert.equal(h.defenceHoldMs({ att: { mine: false }, def: { mine: true } }), 3000);
+  assert.equal(h.defenceHoldMs({ att: { mine: true }, def: { mine: true } }), 0);
+  assert.equal(h.defenceHoldMs(null), 0);
+});
+test('a defending player sees the pre-battle hold prompt and can skip it with play', async () => {
+  const f = fixture(), { h, get } = f;
+  h.S.current = 'newtaipei'; h.S.army.newtaipei = { inf: 10 }; h.S.army.taipei = { inf: 5 };
+  const defend = h.doAttack('newtaipei', 'taipei', h.S.gen, false, { inf: 4 });
+  await untilStep(f, 0);
+  assert.equal(get('#bsHold').hidden, false);
+  assert.match(get('#bsHold').textContent, /守城戰！可先使用 🎴 戰術（\d 秒後自動開戰）/);
+  assert.equal(h.BV.holding, true);
+  get('#bsPause').handlers.click();
+  assert.equal(h.BV.holding, false);
+  await f.flush(); await defend;
 });
 
 test('synthesized sfx stays silent without AudioContext, defaults to muted, and persists the toggle', () => {
