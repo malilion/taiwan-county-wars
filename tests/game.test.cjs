@@ -108,7 +108,7 @@ function fixture() {
   }`, context);
   let source = fs.readFileSync('js/game.js', 'utf8');
   const at = source.lastIndexOf('})();');
-  source = source.slice(0, at) + `Object.assign(harness, { S, initState, runLoop, endPlayerTurn, requestEndTurn, doAttack, saveCheckpoint, loadCheckpoint, saveRules, render, buildFacility, produceBuildings, income, defMult, openAttack, showStart, newGame, recruit, confirmTransfer, changeTransfer, freshArmy, reachable, checkEnd, startInvasion, doExpedition, invasionRaid, expeditionAllowed, borderThreat, setPosture, atkMult, aiTurn, BV, startAim, aimAt, pickedArmy, nextTurn, openSkillPicker, useSkill, aiUseSkills, combatOptions, defenceHoldMs, needsLowChanceConfirm, LOW_CHANCE });` + source.slice(at);
+  source = source.slice(0, at) + `Object.assign(harness, { S, initState, runLoop, endPlayerTurn, requestEndTurn, doAttack, saveCheckpoint, loadCheckpoint, saveRules, render, buildFacility, produceBuildings, income, defMult, openAttack, showStart, newGame, recruit, confirmTransfer, changeTransfer, freshArmy, reachable, checkEnd, startInvasion, doExpedition, invasionRaid, expeditionAllowed, borderThreat, setPosture, atkMult, aiTurn, BV, startAim, aimAt, pickedArmy, nextTurn, openSkillPicker, useSkill, aiUseSkills, combatOptions, defenceHoldMs, needsLowChanceConfirm, LOW_CHANCE, trapFocusTarget, battleFocusables });` + source.slice(at);
   vm.runInContext(source, context);
   const h = context.harness;
   h.initState('play', 'taipei');
@@ -1734,6 +1734,20 @@ test('modifier+E/Enter/Escape do not end the turn or confirm or cancel an attack
   assert.equal(down('Escape', { ctrlKey: true }), false);
   assert.equal(get('#attackDialog').hidden, false);
   assert.ok(h.S.attack);
+});
+test('trapFocusTarget wraps the ends and leaves the middle to the browser', () => {
+  const { h } = fixture();
+  const first = { id: 'first' }, mid = { id: 'mid' }, last = { id: 'last' };
+  const list = [first, mid, last];
+  const outside = { id: 'outside' }, container = { id: 'battleScreen' };
+  assert.equal(h.trapFocusTarget(list, last, false), first);
+  assert.equal(h.trapFocusTarget(list, first, true), last);
+  assert.equal(h.trapFocusTarget(list, container, false), first);
+  assert.equal(h.trapFocusTarget(list, container, true), last);
+  assert.equal(h.trapFocusTarget(list, outside, false), first);
+  assert.equal(h.trapFocusTarget(list, outside, true), last);
+  assert.equal(h.trapFocusTarget(list, mid, false), null);
+  assert.equal(h.trapFocusTarget(list, mid, true), null);
 });
 test('needsLowChanceConfirm is true at or below 10 percent', () => {
   const { h } = fixture();
