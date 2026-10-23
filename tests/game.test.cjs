@@ -1437,14 +1437,39 @@ test('a defending player sees the pre-battle hold prompt and can skip it with pl
   assert.equal(h.BV.holding, false);
   await f.flush(); await defend;
 });
-test('needsLowChanceConfirm is true below 10 percent', () => {
+test('needsLowChanceConfirm is true at or below 10 percent', () => {
   const { h } = fixture();
   assert.equal(h.LOW_CHANCE, 10);
   assert.equal(h.needsLowChanceConfirm(0), true);
   assert.equal(h.needsLowChanceConfirm(9), true);
-  assert.equal(h.needsLowChanceConfirm(10), false);
+  assert.equal(h.needsLowChanceConfirm(10), true);
+  assert.equal(h.needsLowChanceConfirm(10.5), false);
+  assert.equal(h.needsLowChanceConfirm(11), false);
   assert.equal(h.needsLowChanceConfirm(65), false);
   assert.equal(h.needsLowChanceConfirm(undefined), false);
+});
+test('an estimate of exactly 10 percent needs two confirm clicks', async () => {
+  const f = fixture(), { h, get } = f;
+  h.S.speed = 99;
+  h.S.army.taipei = { inf: 2 };
+  h.S.army.newtaipei = { inf: 2 };
+  h.openAttack('taipei', 'newtaipei');
+  assert.equal(h.S.attack.chance, 10);
+  const army = JSON.stringify(h.S.army);
+  const first = get('#attackConfirm').handlers.click();
+  await first;
+  assert.equal(h.S.acted.has('taipei'), false);
+  assert.equal(get('#attackDialog').hidden, false);
+  assert.equal(JSON.stringify(h.S.army), army);
+  assert.ok(get('#attackConfirm').classList.contains('danger'));
+  assert.match(get('#attackConfirm').textContent, /勝率僅 10%/);
+  assert.equal(get('#lowChanceWarning').hidden, false);
+  assert.match(get('#lowChanceWarning').textContent, /僅 10%/);
+  const launch = get('#attackConfirm').handlers.click();
+  await Promise.resolve();
+  assert.ok(h.S.acted.has('taipei'));
+  await f.flush();
+  await launch;
 });
 test('a 0% attack needs two confirm clicks before it launches', async () => {
   const f = fixture(), { h, get } = f;
