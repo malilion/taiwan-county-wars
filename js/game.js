@@ -2071,18 +2071,10 @@
       if ((e.key === 't' || e.key === 'T') && !e.repeat) { e.preventDefault(); toggleTacticMenu(); }
       if (e.key === 'ArrowLeft' || e.key === 'ArrowRight') { e.preventDefault(); moveRow(e.key === 'ArrowRight' ? -1 : 1); } // 我方在左：→ 往前
       if (e.key === ' ') {
-        const running = $('#bsDone').hidden;
-        // 戰術選單裡的按鈕仍交給瀏覽器（空白鍵＝點該戰術）；其餘焦點一律暫停，避免 ⏭ 被原生 click 略過。
-        const tacticBtn = e.target?.tagName === 'BUTTON' && !$('#bsTacticMenu').hidden && !!e.target.closest?.('#bsTacticMenu');
-        if (running) {
-          if (!tacticBtn) {
-            e.preventDefault();
-            if (!e.repeat) toggleBattlePause();
-          }
-        } else if (e.target.tagName !== 'BUTTON') {
-          e.preventDefault();
-          toggleBattlePause();
-        }
+        // 焦點在按鈕上時，空白鍵交給瀏覽器原生按下。
+        if (e.target?.tagName === 'BUTTON') return;
+        e.preventDefault();
+        if (!e.repeat) toggleBattlePause();
       }
       return;
     }
@@ -2091,13 +2083,6 @@
     if (e.key === 'e' || (e.key === 'Enter' && e.target.tagName !== 'BUTTON')) requestEndTurn();
     if (e.key === 'Escape') { S.sel = null; S.transferMode = false; clearAim(); render(); }
   });
-  // Chromium／Firefox 在空白鍵 keyup 才真正啟動按鈕。戰鬥進行中擋掉，避免滑鼠點過 ⏸ 後再按空白鍵連動兩次。
-  document.addEventListener('keyup', e => {
-    if (!BV.open || e.key !== ' ' || !$('#bsDone').hidden) return;
-    if (e.target?.tagName !== 'BUTTON' || e.target.closest?.('#bsTacticMenu')) return;
-    e.preventDefault();
-  });
-
   // 小地圖與縮放
   buildMinimap($('#minimap'), map.view);
   map.view.onChange(v => { $('#zoom').value = v.z; });
