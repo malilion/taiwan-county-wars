@@ -1512,6 +1512,49 @@ test('space pauses a running attack when no button is focused; a focused button 
   assert.equal(get('#battleScreen').hidden, true);
   assert.equal(h.BV.open, false);
 });
+test('modifier+S/Esc/Space do not skip or pause a running battle', async () => {
+  const f = fixture(), { h, get } = f;
+  h.S.army.taipei = { inf: 10 }; h.S.army.newtaipei = { inf: 5 };
+  const attack = h.doAttack('taipei', 'newtaipei', h.S.gen, false, { inf: 4 });
+  await untilStep(f, 0);
+  assert.equal(get('#bsDone').hidden, true);
+  assert.equal(h.BV.paused, false);
+  assert.equal(h.BV.skip, false);
+  const down = (key, extra = {}) => {
+    let prevented = false;
+    f.listeners.keydown.at(-1)({
+      key,
+      repeat: !!extra.repeat,
+      ctrlKey: !!extra.ctrlKey,
+      metaKey: !!extra.metaKey,
+      altKey: !!extra.altKey,
+      preventDefault() { prevented = true; },
+      target: extra.target || { tagName: 'DIV' },
+    });
+    return prevented;
+  };
+  for (const key of ['s', 'S']) {
+    for (const mod of ['ctrlKey', 'metaKey', 'altKey']) {
+      assert.equal(down(key, { [mod]: true }), false, `${mod}+${key} keeps the browser shortcut`);
+      assert.equal(h.BV.skip, false);
+      assert.equal(h.BV.paused, false);
+    }
+  }
+  assert.equal(down('Escape', { ctrlKey: true }), false);
+  assert.equal(h.BV.skip, false);
+  assert.equal(h.BV.paused, false);
+  assert.equal(down(' ', { metaKey: true, target: { tagName: 'DIV' } }), false);
+  assert.equal(h.BV.skip, false);
+  assert.equal(h.BV.paused, false);
+  assert.equal(down('s'), true);
+  assert.equal(h.BV.skip, true);
+  h.BV.skip = false;
+  assert.equal(down('S'), true);
+  assert.equal(h.BV.skip, true);
+  await f.flush(); await attack;
+  assert.equal(get('#battleScreen').hidden, true);
+  assert.equal(h.BV.open, false);
+});
 test('needsLowChanceConfirm is true at or below 10 percent', () => {
   const { h } = fixture();
   assert.equal(h.LOW_CHANCE, 10);

@@ -2066,15 +2066,19 @@
       return;
     }
     if (BV.open) {
-      if (e.key === 'Escape') skipBattle();
-      if ((e.key === 's' || e.key === 'S') && !e.repeat) { e.preventDefault(); skipBattle(); }
+      const mod = e.ctrlKey || e.metaKey || e.altKey;
+      // 按住 Ctrl、Cmd 或 Alt 時，Esc、S、空白留給瀏覽器快捷鍵。
+      if (e.key === 'Escape' && !mod) skipBattle();
+      if ((e.key === 's' || e.key === 'S') && !e.repeat && !mod) { e.preventDefault(); skipBattle(); }
       if ((e.key === 't' || e.key === 'T') && !e.repeat) { e.preventDefault(); toggleTacticMenu(); }
       if (e.key === 'ArrowLeft' || e.key === 'ArrowRight') { e.preventDefault(); moveRow(e.key === 'ArrowRight' ? -1 : 1); } // 我方在左：→ 往前
       if (e.key === ' ') {
         // 焦點在按鈕上時，空白鍵交給瀏覽器原生按下。
         if (e.target?.tagName === 'BUTTON') return;
-        e.preventDefault();
-        if (!e.repeat) toggleBattlePause();
+        if (!mod) {
+          e.preventDefault();
+          if (!e.repeat) toggleBattlePause();
+        }
       }
       return;
     }
