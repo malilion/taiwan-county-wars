@@ -31,6 +31,7 @@ function fixture() {
     remove() { if (this.parent) this.parent.children = this.parent.children.filter(e => e !== this); }
     replaceChildren() { this.children = []; }
     addEventListener(event, fn) { this.handlers[event] = fn; }
+    click() { if (!this.disabled) return this.handlers.click?.(); }
     querySelectorAll() { return []; }
     setAttribute() {}
     focus() {}
@@ -57,7 +58,7 @@ function fixture() {
   }`, context);
   let source = fs.readFileSync('js/game.js', 'utf8');
   const at = source.lastIndexOf('})();');
-  source = source.slice(0, at) + `Object.assign(harness, { S, initState, runLoop, endPlayerTurn, requestEndTurn, doAttack, saveCheckpoint, loadCheckpoint, saveRules, render, buildFacility, produceBuildings, income, defMult, openAttack, showStart, newGame, recruit, confirmTransfer, changeTransfer, freshArmy, reachable, checkEnd, startInvasion, doExpedition, invasionRaid, expeditionAllowed, borderThreat, setPosture, atkMult, aiTurn, BV, startAim, aimAt, pickedArmy, nextTurn, openSkillPicker, useSkill, aiUseSkills, combatOptions, defenceHoldMs });` + source.slice(at);
+  source = source.slice(0, at) + `Object.assign(harness, { S, initState, runLoop, endPlayerTurn, requestEndTurn, doAttack, saveCheckpoint, loadCheckpoint, saveRules, render, buildFacility, produceBuildings, income, defMult, openAttack, showStart, newGame, recruit, confirmTransfer, changeTransfer, freshArmy, reachable, checkEnd, startInvasion, doExpedition, invasionRaid, expeditionAllowed, borderThreat, setPosture, atkMult, aiTurn, BV, startAim, aimAt, pickedArmy, nextTurn, openSkillPicker, useSkill, aiUseSkills, combatOptions, defenceHoldMs, needsLowChanceConfirm, LOW_CHANCE });` + source.slice(at);
   vm.runInContext(source, context);
   const h = context.harness;
   h.initState('play', 'taipei');
@@ -1435,6 +1436,103 @@ test('a defending player sees the pre-battle hold prompt and can skip it with pl
   get('#bsPause').handlers.click();
   assert.equal(h.BV.holding, false);
   await f.flush(); await defend;
+});
+test('needsLowChanceConfirm is true below 10 percent', () => {
+  const { h } = fixture();
+  assert.equal(h.LOW_CHANCE, 10);
+  assert.equal(h.needsLowChanceConfirm(0), true);
+  assert.equal(h.needsLowChanceConfirm(9), true);
+  assert.equal(h.needsLowChanceConfirm(10), false);
+  assert.equal(h.needsLowChanceConfirm(65), false);
+  assert.equal(h.needsLowChanceConfirm(undefined), false);
+});
+test('a 0% attack needs two confirm clicks before it launches', async () => {
+  const f = fixture(), { h, get } = f;
+  h.S.speed = 99;
+  h.S.army.taipei = { inf: 2 };
+  h.S.army.newtaipei = { gen: 25 };
+  h.openAttack('taipei', 'newtaipei');
+  assert.equal(h.S.attack.chance, 0);
+  const army = JSON.stringify(h.S.army);
+  const first = get('#attackConfirm').handlers.click();
+  await first;
+  assert.equal(h.S.acted.has('taipei'), false);
+  assert.equal(get('#attackDialog').hidden, false);
+  assert.equal(JSON.stringify(h.S.army), army);
+  assert.ok(get('#attackConfirm').classList.contains('danger'));
+  assert.match(get('#attackConfirm').textContent, /勝率僅 0%/);
+  assert.equal(get('#lowChanceWarning').hidden, false);
+  assert.match(get('#lowChanceWarning').textContent, /僅 0%/);
+  get('#attackRows').handlers.change({ target: { dataset: { amount: 'inf' }, value: '1' } });
+  assert.equal(get('#attackConfirm').classList.contains('danger'), false);
+  assert.equal(get('#lowChanceWarning').hidden, true);
+  const again = get('#attackConfirm').handlers.click();
+  await again;
+  assert.equal(h.S.acted.has('taipei'), false, 'changing deployment resets the warning');
+  assert.equal(get('#attackDialog').hidden, false);
+  const launch = get('#attackConfirm').handlers.click();
+  await Promise.resolve();
+  assert.ok(h.S.acted.has('taipei'));
+  await f.flush();
+  await launch;
+});
+test('Enter in the attack dialog follows the same two-step low-chance confirm', async () => {
+  const f = fixture(), { h, get } = f;
+  h.S.speed = 99;
+  get('#modal').hidden = true;
+  h.S.army.taipei = { inf: 2 };
+  h.S.army.newtaipei = { gen: 25 };
+  h.openAttack('taipei', 'newtaipei');
+  const press = (key, target) => f.listeners.keydown.at(-1)({
+    key, preventDefault() {}, target: target || { tagName: 'DIV' },
+  });
+  press('Enter');
+  assert.equal(h.S.acted.has('taipei'), false);
+  assert.equal(get('#attackDialog').hidden, false);
+  assert.match(get('#attackConfirm').textContent, /勝率僅 0%/);
+  press('Enter');
+  await Promise.resolve();
+  assert.ok(h.S.acted.has('taipei'));
+  await f.flush();
+});
+test('Enter on another attack-dialog button does not arm the attack; Enter on an input still confirms in two steps', async () => {
+  const f = fixture(), { h, get } = f;
+  h.S.speed = 99;
+  get('#modal').hidden = true;
+  h.S.army.taipei = { inf: 2 };
+  h.S.army.newtaipei = { gen: 25 };
+  h.openAttack('taipei', 'newtaipei');
+  const prevented = [];
+  const press = (key, target) => f.listeners.keydown.at(-1)({
+    key,
+    preventDefault() { prevented.push(target.tagName); },
+    target,
+  });
+  const label = get('#attackConfirm').textContent;
+  press('Enter', { tagName: 'BUTTON', id: 'someOtherBtn' });
+  assert.equal(h.S.acted.has('taipei'), false);
+  assert.equal(get('#attackDialog').hidden, false);
+  assert.equal(get('#lowChanceWarning').hidden, true);
+  assert.equal(get('#attackConfirm').classList.contains('danger'), false);
+  assert.equal(get('#attackConfirm').textContent, label);
+  assert.equal(h.S.current, 'taipei');
+  assert.equal(get('#endTurn').classList.contains('confirming'), false);
+  assert.deepEqual(prevented, []);
+
+  press('Enter', { tagName: 'INPUT' });
+  assert.equal(h.S.acted.has('taipei'), false);
+  assert.equal(get('#attackDialog').hidden, false);
+  assert.equal(get('#lowChanceWarning').hidden, false);
+  assert.match(get('#attackConfirm').textContent, /勝率僅 0%/);
+  assert.equal(h.S.current, 'taipei');
+  assert.equal(get('#endTurn').classList.contains('confirming'), false);
+  assert.deepEqual(prevented, ['INPUT']);
+
+  press('Enter', { tagName: 'INPUT' });
+  await Promise.resolve();
+  assert.ok(h.S.acted.has('taipei'));
+  assert.equal(h.S.current, 'taipei');
+  await f.flush();
 });
 
 test('synthesized sfx stays silent without AudioContext, defaults to muted, and persists the toggle', () => {

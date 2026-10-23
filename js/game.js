@@ -908,6 +908,29 @@
     clearAim();
   }
 
+  const LOW_CHANCE = 10;
+  function needsLowChanceConfirm(chance) {
+    return Number.isFinite(Number(chance)) && Number(chance) < LOW_CHANCE;
+  }
+  function armLowChanceWarning(chance) {
+    const btn = $('#attackConfirm');
+    btn.classList.add('danger');
+    btn.classList.remove('primary');
+    btn.textContent = `⚠️ 勝率僅 ${chance}%，仍要出征？`;
+    const warn = $('#lowChanceWarning');
+    warn.hidden = false;
+    warn.textContent = `⚠️ 預估攻陷機率僅 ${chance}%。再按一次才會出征。`;
+  }
+  function resetLowChanceWarning(total) {
+    const btn = $('#attackConfirm');
+    btn.classList.remove('danger');
+    btn.classList.add('primary');
+    btn.textContent = `⚔️ 確認出征 ${total} 人`;
+    const warn = $('#lowChanceWarning');
+    warn.hidden = true;
+    warn.textContent = '';
+  }
+
   function openAttack(src, tgt, kind = 'county') {
     cancelEndTurnConfirm();
     S.attack = { src, tgt, kind, sent: Combat.plan(freshArmy(src), S.units, S.sendHalf) };
@@ -945,8 +968,10 @@
     const risk = borderThreat(src, reserveArmy);
     $('#reserveWarning').textContent = `${home} 人留守${byId[src].short}。` + (risk.peace ? '目前仍在和平期。' : risk.level === 'high' ? '⚠️ 鄰國兵力明顯超過留守部隊，可能遭到反攻。' : risk.threats.length ? '鄰國可能反攻，請搭配駐防與要塞。' : S.invasion ? '請保留守軍應對外星空襲。' : '目前無相鄰敵軍。');
     $('#reserveWarning').className = 'reserveWarning' + (!risk.peace && risk.level === 'high' ? ' danger' : '');
+    S.attack.chance = estimate ? estimate.chance : null;
+    S.attack.lowChanceWarned = false;
     $('#attackConfirm').disabled = !valid;
-    $('#attackConfirm').textContent = `⚔️ 確認出征 ${total} 人`;
+    resetLowChanceWarning(total);
   }
   $('#attackRows').addEventListener('click', e => {
     const b = e.target.closest('button[data-unit]');
@@ -985,16 +1010,21 @@
     const { src, tgt, sent, kind } = S.attack;
     if (kind === 'invasion') {
       if (!expeditionAllowed(src, tgt) || !Combat.validDeployment(freshArmy(src), sent, S.units)) return;
+    } else if (S.owner[src] !== S.player || S.owner[tgt] === S.player || S.acted.has(src) || stunned(src) || !Combat.validDeployment(freshArmy(src), sent, S.units)) return;
+    const chance = S.attack.chance;
+    if (needsLowChanceConfirm(chance) && !S.attack.lowChanceWarned) {
+      S.attack.lowChanceWarned = true;
+      armLowChanceWarning(chance);
       sfx('click');
-      $('#attackDialog').hidden = true;
-      S.attack = null;
-      await doExpedition(src, tgt, sent, S.gen);
       return;
     }
-    if (S.owner[src] !== S.player || S.owner[tgt] === S.player || S.acted.has(src) || stunned(src) || !Combat.validDeployment(freshArmy(src), sent, S.units)) return;
     sfx('click');
     $('#attackDialog').hidden = true;
     S.attack = null;
+    if (kind === 'invasion') {
+      await doExpedition(src, tgt, sent, S.gen);
+      return;
+    }
     S.busy = true;
     const gen = S.gen;
     await doAttack(src, tgt, gen, false, sent);
@@ -2027,6 +2057,13 @@
       else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first.focus(); }
     }
     if (e.key === 'Escape' && !$('#attackDialog').hidden) { $('#attackCancel').click(); return; }
+    if (e.key === 'Enter' && !$('#attackDialog').hidden) {
+      // 焦點在任何按鈕上時交給瀏覽器原生 click，避免 ±／預設鍵被當成確認出征。
+      if (e.target?.tagName === 'BUTTON') return;
+      e.preventDefault();
+      if (!$('#attackConfirm').disabled) $('#attackConfirm').click();
+      return;
+    }
     if (BV.open) {
       if (e.key === 'Escape') skipBattle();
       if ((e.key === 't' || e.key === 'T') && !e.repeat) { e.preventDefault(); toggleTacticMenu(); }
