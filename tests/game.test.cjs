@@ -504,11 +504,30 @@ test('battles run until one side is wiped out and retreat keeps the current surv
     assert.deepEqual(r.rounds.at(-1).A, r.A);
   }
   const o = options({ inf: 12, moto: 3 }, { gen: 14 }), st = Combat.setup(o);
+  const tacticUsed = JSON.parse(JSON.stringify(st.tacticUsed));
+  const buff = JSON.parse(JSON.stringify(st.buff));
   assert.equal(Combat.finish(st, true).lostA, 0);
-  Combat.step(st, o, () => 0.5);
-  const mid = Combat.finish(st, true);
+  assert.equal(st.done, true);
+  assert.equal(Combat.useTactic(st, 'A', 'fire'), false);
+  assert.deepEqual(st.tacticUsed, tacticUsed);
+  assert.deepEqual(st.buff, buff);
+  assert.equal(Combat.swap(st, 'A', 0, 1), false);
+  const ongoing = Combat.setup(o);
+  assert.equal(ongoing.done, false);
+  assert.equal(Combat.finish(ongoing, false).retreated, false);
+  assert.equal(ongoing.done, false, 'a non-retreat finish does not end a live battle');
+  const midSt = Combat.setup(o);
+  Combat.step(midSt, o, () => 0.5);
+  const midUsed = JSON.parse(JSON.stringify(midSt.tacticUsed));
+  const midBuff = JSON.parse(JSON.stringify(midSt.buff));
+  const mid = Combat.finish(midSt, true);
   assert.ok(mid.retreated); assert.equal(mid.win, false); assert.equal(mid.timeout, false);
   assert.equal(Combat.count(mid.A) + mid.lostA, 15); assert.equal(Combat.count(mid.D) + mid.lostD, 14);
+  assert.equal(midSt.done, true);
+  assert.equal(Combat.useTactic(midSt, 'A', 'fire'), false);
+  assert.deepEqual(midSt.tacticUsed, midUsed);
+  assert.deepEqual(midSt.buff, midBuff);
+  assert.equal(Combat.swap(midSt, 'A', 0, 1), false);
 });
 test('each unit type fights in its own row; attackers line up against what they counter', () => {
   const o = options({ moto: 5, gen: 5 }, { inf: 6, art: 4 }), st = Combat.setup(o);
@@ -657,6 +676,105 @@ test('strategic retreat keeps that clash\'s survivors, spares the target and use
   assert.equal(Combat.count(h.S.army.taipei), 1 + Combat.count(r.A));
   assert.equal(Combat.count(h.S.army.newtaipei), Combat.count(r.D));
   assert.ok(h.S.acted.has('taipei'));
+});
+function battleSnapshot(h) {
+  return JSON.parse(JSON.stringify({
+    army: h.S.army,
+    owner: h.S.owner,
+    money: h.S.money,
+    research: h.S.research,
+    current: h.S.current,
+    day: h.S.day,
+    acted: [...h.S.acted],
+    tacticUsed: h.BV.st.tacticUsed,
+    buff: h.BV.st.buff,
+  }));
+}
+async function untilBattleResult(f) {
+  for (let i = 0; i < 50 && f.get('#bsDone').hidden; i++) await Promise.resolve();
+  assert.equal(f.get('#bsDone').hidden, false, 'battle result should be showing');
+}
+// Troops are written back when the result screen closes. Tactics must not change that settlement.
+function armyAfterResult(before, result, src, tgt) {
+  const army = JSON.parse(JSON.stringify(before));
+  if (result.win) army[tgt] = JSON.parse(JSON.stringify(result.A));
+  else {
+    army[tgt] = JSON.parse(JSON.stringify(result.D));
+    for (const [k, n] of Object.entries(result.A)) if (n > 0) army[src][k] = (army[src][k] || 0) + n;
+  }
+  return army;
+}
+async function assertNoTacticOnResult(f, battle, src, tgt) {
+  const { h, get } = f;
+  await untilBattleResult(f);
+  assert.equal(h.BV.st.done, true);
+  assert.equal(get('#bsTacticBtn').disabled, true);
+  assert.equal(h.battleFocusables().includes(get('#bsTacticBtn')), false);
+  const snap = battleSnapshot(h);
+  const press = key => f.listeners.keydown.at(-1)({ key, preventDefault() {}, target: { tagName: 'DIV' } });
+  const sealed = () => {
+    assert.equal(get('#bsTacticMenu').hidden, true);
+    assert.equal(get('#bsTacticBtn').disabled, true);
+    assert.deepEqual(battleSnapshot(h), snap);
+  };
+  get('#bsTacticBtn').handlers.click();
+  sealed();
+  press('t');
+  sealed();
+  press('T');
+  sealed();
+  for (const key of ['fire', 'wall', 'smoke', 'heal']) {
+    assert.equal(h.castTactic(key), false, key);
+    sealed();
+  }
+  get('#bsTacticMenu').handlers.click({
+    target: { closest: sel => sel === 'button[data-tactic]' ? { dataset: { tactic: 'fire' }, disabled: false } : null },
+  });
+  sealed();
+  await f.flush();
+  await battle;
+  const closed = battleSnapshot(h);
+  assert.deepEqual(closed.tacticUsed, snap.tacticUsed);
+  assert.deepEqual(closed.buff, snap.buff);
+  assert.deepEqual(closed.owner, snap.owner);
+  assert.deepEqual(closed.money, snap.money);
+  assert.deepEqual(closed.research, snap.research);
+  assert.equal(closed.current, snap.current);
+  assert.equal(closed.day, snap.day);
+  assert.deepEqual(closed.acted, snap.acted);
+  assert.deepEqual(closed.army, armyAfterResult(snap.army, h.S.lastBattle, src, tgt));
+}
+test('no tactic can fire after a retreat or a finished battle, and game state is unchanged', async () => {
+  {
+    const f = fixture(), { h, get } = f;
+    h.S.research.taipei = { atk: 2, def: 2, eco: 1 };
+    h.S.army.taipei = { inf: 21 };
+    h.S.army.newtaipei = { gen: 20 };
+    const battle = h.doAttack('taipei', 'newtaipei', h.S.gen, false, { inf: 20 });
+    await untilStep(f, 1);
+    get('#bsRetreat').handlers.click();
+    await assertNoTacticOnResult(f, battle, 'taipei', 'newtaipei');
+    assert.equal(h.S.lastBattle.retreated, true);
+    assert.equal(h.S.lastBattle.win, false);
+    assert.equal(h.BV.st.tacticUsed.A, undefined);
+  }
+  {
+    const f = fixture(), { h } = f;
+    vm.runInContext('Math.random = () => 0.5', f.context);
+    h.S.research.taipei = { atk: 2, def: 2, eco: 1 };
+    h.S.units.inf = { ...h.S.units.inf, atk: 0, hp: 1e9 };
+    h.S.units.gen = { ...h.S.units.gen, atk: 0, hp: 1e9 };
+    h.S.army.taipei = { inf: 21 };
+    h.S.army.newtaipei = { gen: 20 };
+    const battle = h.doAttack('taipei', 'newtaipei', h.S.gen, false, { inf: 20 });
+    await untilStep(f, 1);
+    f.listeners.keydown.at(-1)({ key: 'S', preventDefault() {}, target: { tagName: 'DIV' } });
+    await assertNoTacticOnResult(f, battle, 'taipei', 'newtaipei');
+    assert.equal(h.S.lastBattle.retreated, false);
+    assert.equal(h.S.lastBattle.timeout, true);
+    assert.equal(h.BV.st.tacticUsed.A, undefined);
+    assert.equal(h.S.owner.newtaipei, 'newtaipei');
+  }
 });
 test('defending players watch without a retreat button; lightning speed and AI-only battles skip the screen', async () => {
   const f = fixture(), { h, get } = f;

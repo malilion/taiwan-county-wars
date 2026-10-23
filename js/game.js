@@ -1379,6 +1379,7 @@
     $('#bsTacticMenu').hidden = true;
     $('#bsFloat').hidden = true;
     $('#bsHold').hidden = true;
+    if (BV.st) BV.st.done = true;
     renderTacticBtn();
     $('#bsDone').hidden = false;
     keepBattleFocus($('#bsDone'));
