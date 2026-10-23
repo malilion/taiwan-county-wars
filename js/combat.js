@@ -180,6 +180,8 @@ const Combat = (() => {
     return true;
   }
   function finish(st, retreated = false) {
+    // 戰略撤退當下結束戰鬥；結算數字與撤退前相同，只是之後不能再放戰術或換排。
+    if (retreated === true) st.done = true;
     const aliveA = count(st.A) > 0, aliveD = count(st.D) > 0;
     const timeout = !retreated && aliveA && aliveD && (st.round >= TIME_LIMIT || st.round >= MAX_ROUNDS);
     const win = !retreated && !aliveD && aliveA;
