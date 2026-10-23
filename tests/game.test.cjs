@@ -6,6 +6,7 @@ const Combat = require('../js/combat.js');
 const GameSaves = require('../js/saves.js');
 
 function fixture() {
+  const focus = { el: null, doc: null };
   class Element {
     constructor() {
       this.children = []; this.hidden = true; this.style = {}; this.dataset = {}; this.handlers = {};
@@ -34,14 +35,16 @@ function fixture() {
     click() { if (!this.disabled) return this.handlers.click?.(); }
     querySelectorAll() { return []; }
     setAttribute() {}
-    focus() {}
+    focus() { focus.el = this; if (focus.doc) focus.doc.activeElement = this; }
   }
   const knownIds = new Set([...fs.readFileSync('index.html', 'utf8').matchAll(/id="([^"]+)"/g)].map(m => '#' + m[1]));
   const elements = new Map(), get = id => { if (!knownIds.has(id)) throw Error('Missing DOM element: ' + id); if (!elements.has(id)) elements.set(id, new Element()); return elements.get(id); };
   const timers = [], storage = new Map(), listeners = {};
+  const documentStub = { querySelector: get, querySelectorAll: () => [], addEventListener(type, fn) { (listeners[type] ||= []).push(fn); }, createElement: () => new Element(), activeElement: null };
+  focus.doc = documentStub;
   const context = vm.createContext({
     console, harness: {}, confirm: () => true,
-    document: { querySelector: get, querySelectorAll: () => [], addEventListener(type, fn) { (listeners[type] ||= []).push(fn); }, createElement: () => new Element() },
+    document: documentStub,
     window: { addEventListener() {} }, localStorage: { getItem: k => storage.get(k) || null, setItem: (k, v) => storage.set(k, v) },
     setTimeout: fn => { timers.push(fn); return timers.length; }, clearTimeout() {},
     MAP_W: 640, MAP_H: 830, svgEl: () => new Element(), buildMinimap() {},
@@ -64,7 +67,7 @@ function fixture() {
   h.initState('play', 'taipei');
   Object.assign(h.S, { current: 'taipei', diff: vm.runInContext('DIFFICULTY.easy', context), diffKey: 'easy', menuOpen: false, playerStarted: true });
   h.S.order = ['taipei', ...h.S.order.filter(x => x !== 'taipei')];
-  return { h, context, elements, storage, get, timers, listeners, async flush() { for (let i = 0; i < 100; i++) { if (timers.length) timers.shift()(); await Promise.resolve(); } } };
+  return { h, context, elements, storage, get, timers, listeners, get focused() { return focus.el; }, async flush() { for (let i = 0; i < 100; i++) { if (timers.length) timers.shift()(); await Promise.resolve(); } } };
 }
 const dataContext = vm.createContext({});
 vm.runInContext(fs.readFileSync('js/data.js', 'utf8') + '\nthis.data = { UNITS, COUNTERS, TACTICS };', dataContext);
@@ -1436,6 +1439,33 @@ test('a defending player sees the pre-battle hold prompt and can skip it with pl
   get('#bsPause').handlers.click();
   assert.equal(h.BV.holding, false);
   await f.flush(); await defend;
+});
+test('space during a defence hold focuses the battle screen and resumes without skipping', async () => {
+  const f = fixture(), { h, get } = f;
+  h.S.current = 'newtaipei'; h.S.army.newtaipei = { inf: 10 }; h.S.army.taipei = { inf: 5 };
+  const defend = h.doAttack('newtaipei', 'taipei', h.S.gen, false, { inf: 4 });
+  await untilStep(f, 0);
+  assert.equal(h.BV.holding, true);
+  assert.equal(f.focused, get('#battleScreen'));
+  assert.notEqual(f.focused, get('#bsSkip'));
+  f.listeners.keydown.at(-1)({ key: ' ', preventDefault() {}, target: { tagName: 'DIV' } });
+  assert.equal(h.BV.holding, false);
+  assert.equal(h.BV.skip, false);
+  await Promise.resolve();
+  assert.equal(f.focused, get('#battleScreen'));
+  await f.flush(); await defend;
+  assert.equal(get('#battleScreen').hidden, true);
+  assert.ok(h.S.lastBattle);
+});
+test('a player attack battle keeps focus on the skip button', async () => {
+  const f = fixture(), { h, get } = f;
+  h.S.army.taipei = { inf: 10 }; h.S.army.newtaipei = { inf: 5 };
+  const attack = h.doAttack('taipei', 'newtaipei', h.S.gen, false, { inf: 4 });
+  await untilStep(f, 0);
+  assert.equal(h.BV.holding, false);
+  assert.equal(get('#bsHold').hidden, true);
+  assert.equal(f.focused, get('#bsSkip'));
+  await f.flush(); await attack;
 });
 test('needsLowChanceConfirm is true at or below 10 percent', () => {
   const { h } = fixture();

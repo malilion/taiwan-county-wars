@@ -1243,6 +1243,7 @@
     const total = defenceHoldMs(view);
     if (!total || gen !== S.gen) return;
     BV.holding = true;
+    $('#battleScreen').focus();
     const el = $('#bsHold');
     el.hidden = false;
     let remain = Math.max(1, Math.ceil(total / 1000));
