@@ -2041,6 +2041,27 @@
   });
   $('#info').addEventListener('change', e => { if (e.target.id === 'halfChk') { cancelEndTurnConfirm(); S.sendHalf = e.target.checked; renderInfo(); } });
   $('#research').addEventListener('click', e => { const b = e.target.closest('button[data-k]'); if (b) doResearch(b.dataset.k); });
+  // 焦點在清單兩端以外時回傳 null，交給瀏覽器原生 Tab。
+  function trapFocusTarget(list, active, shift) {
+    if (!list?.length) return null;
+    const i = list.indexOf(active);
+    if (i < 0) return shift ? list[list.length - 1] : list[0];
+    if (shift) return i === 0 ? list[list.length - 1] : null;
+    return i === list.length - 1 ? list[0] : null;
+  }
+  function insideHidden(el, root) {
+    let node = el;
+    while (node && node !== root) {
+      if (node.hidden) return true;
+      node = node.parentElement;
+    }
+    return false;
+  }
+  function battleFocusables() {
+    const root = $('#battleScreen');
+    const nodes = typeof root?.querySelectorAll === 'function' ? root.querySelectorAll('button') : [];
+    return [...nodes].filter(btn => btn && !btn.disabled && !insideHidden(btn, root));
+  }
   // Shift 不算在內：大寫 S／T／M 與 Shift+Tab 仍要有效。
   const hasModifier = e => !!(e.ctrlKey || e.metaKey || e.altKey);
   document.addEventListener('keydown', e => {
@@ -2073,6 +2094,20 @@
       return;
     }
     if (BV.open) {
+      if (e.key === 'Tab') {
+        // Ctrl／Cmd／Alt+Tab 留給瀏覽器；Shift+Tab 仍在戰鬥畫面內循環。
+        if (!hasModifier(e)) {
+          const list = battleFocusables();
+          if (!list.length) {
+            e.preventDefault();
+            $('#battleScreen').focus();
+          } else {
+            const next = trapFocusTarget(list, document.activeElement, !!e.shiftKey);
+            if (next) { e.preventDefault(); next.focus(); }
+          }
+        }
+        return;
+      }
       // 按住 Ctrl、Cmd 或 Alt 時，戰鬥快捷鍵留給瀏覽器。
       if (e.key === 'Escape' && !hasModifier(e)) skipBattle();
       if ((e.key === 's' || e.key === 'S') && !e.repeat && !hasModifier(e)) { e.preventDefault(); skipBattle(); }
