@@ -108,7 +108,7 @@ function fixture() {
   }`, context);
   let source = fs.readFileSync('js/game.js', 'utf8');
   const at = source.lastIndexOf('})();');
-  source = source.slice(0, at) + `Object.assign(harness, { S, initState, runLoop, endPlayerTurn, requestEndTurn, doAttack, saveCheckpoint, loadCheckpoint, saveRules, render, buildFacility, produceBuildings, income, defMult, openAttack, showStart, newGame, recruit, confirmTransfer, changeTransfer, freshArmy, reachable, checkEnd, startInvasion, doExpedition, invasionRaid, expeditionAllowed, borderThreat, setPosture, atkMult, aiTurn, BV, startAim, aimAt, pickedArmy, nextTurn, openSkillPicker, useSkill, aiUseSkills, combatOptions, defenceHoldMs, needsLowChanceConfirm, LOW_CHANCE, trapFocusTarget, battleFocusables });` + source.slice(at);
+  source = source.slice(0, at) + `Object.assign(harness, { S, initState, runLoop, endPlayerTurn, requestEndTurn, doAttack, saveCheckpoint, loadCheckpoint, saveRules, render, buildFacility, produceBuildings, income, defMult, openAttack, showStart, newGame, recruit, confirmTransfer, changeTransfer, freshArmy, reachable, checkEnd, startInvasion, doExpedition, invasionRaid, expeditionAllowed, borderThreat, setPosture, atkMult, aiTurn, BV, startAim, aimAt, pickedArmy, nextTurn, openSkillPicker, useSkill, aiUseSkills, combatOptions, defenceHoldMs, needsLowChanceConfirm, LOW_CHANCE, trapFocusTarget, battleFocusables, castTactic, keepBattleFocus });` + source.slice(at);
   vm.runInContext(source, context);
   const h = context.harness;
   h.initState('play', 'taipei');
@@ -1748,6 +1748,36 @@ test('trapFocusTarget wraps the ends and leaves the middle to the browser', () =
   assert.equal(h.trapFocusTarget(list, outside, true), last);
   assert.equal(h.trapFocusTarget(list, mid, false), null);
   assert.equal(h.trapFocusTarget(list, mid, true), null);
+});
+test('disabling 往前 moves focus to the other move button or the battle screen; castTactic focuses the screen', async () => {
+  const f = fixture(), { h, get } = f;
+  h.S.army.taipei = { inf: 10, moto: 6 }; h.S.army.newtaipei = { gen: 12, art: 6 };
+  const attack = h.doAttack('taipei', 'newtaipei', h.S.gen, false, { inf: 9, moto: 6 });
+  await untilStep(f, 0);
+  const fwd = get('#bsFwd'), back = get('#bsBack'), screen = get('#battleScreen');
+  assert.equal(h.BV.sel, 0);
+  assert.equal(fwd.disabled, true);
+  back.focus();
+  back.handlers.click();
+  assert.equal(h.BV.sel, 1);
+  assert.equal(fwd.disabled, false);
+  fwd.focus();
+  fwd.handlers.click();
+  assert.equal(fwd.disabled, true);
+  assert.ok(f.focused === back || f.focused === screen);
+  assert.notEqual(f.focused, null);
+  assert.notEqual(f.focused, f.context.document.body);
+  assert.notEqual(f.context.document.activeElement, null);
+  assert.notEqual(f.context.document.activeElement, f.context.document.body);
+  assert.notEqual(f.focused, fwd);
+
+  get('#bsTacticBtn').focus();
+  assert.equal(h.castTactic('fire'), true);
+  assert.equal(get('#bsTacticBtn').disabled, true);
+  assert.equal(get('#bsTacticMenu').hidden, true);
+  assert.equal(f.focused, screen);
+  assert.notEqual(f.context.document.activeElement, f.context.document.body);
+  await f.flush(); await attack;
 });
 test('needsLowChanceConfirm is true at or below 10 percent', () => {
   const { h } = fixture();
