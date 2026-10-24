@@ -1659,7 +1659,7 @@
     aimEl.label.setAttribute('y', my);
     aimEl.label.setAttribute('fill', color);
     const n = count(pickedArmy(src, S.aim.cells)), keep = t.kind === 'attack' && n > 0 && n >= count(freshArmy(src)); // 進攻時把新鮮部隊全選會自動留 1 人守家
-    aimEl.label.textContent = `${keep ? n - 1 : n} 人${t.kind === 'attack' ? ' ⚔️ 進攻' : t.kind === 'move' ? ' 🚚 調兵' : ''}${keep ? '（留 1 守家）' : ''}`;
+    aimEl.label.textContent = `${keep ? n - 1 : n} 人${t.kind === 'attack' ? ' ⚔️ 進攻' : t.kind === 'move' ? ' 🚚 調兵' : t.reason ? `：${t.reason}` : ''}${keep ? '（留 1 守家）' : ''}`;
   }
   const mapSvg = $('#map');
   const toMap = e => { const p = new DOMPoint(e.clientX, e.clientY).matrixTransform(mapSvg.getScreenCTM().inverse()); return [p.x, p.y]; };

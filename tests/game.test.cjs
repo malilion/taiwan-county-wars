@@ -1160,7 +1160,7 @@ test('a transfer only reaches an adjacent own county, and each troop moves once 
   h.S.army.kinmen = { inf: 1 };
   h.S.army.yilan = { inf: 4 };
 
-  assert.deepEqual([...h.reachable('taipei')].sort(), ['newtaipei']);
+  assert.deepEqual([...h.reachable('taipei')].sort(), ['keelung', 'newtaipei']);
   assert.equal(h.reachable('keelung').has('lienchiang'), true, 'sea links count as adjacent');
   assert.equal(h.reachable('keelung').has('kinmen'), false, 'a sea route does not skip the county in between');
 

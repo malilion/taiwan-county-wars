@@ -27,7 +27,7 @@ const COUNTIES = [
 
 // 陸地相鄰 + 海上航線（雙向，寫一邊即可）
 const ADJACENCY = {
-  keelung: ['newtaipei', 'lienchiang'],
+  keelung: ['newtaipei', 'taipei', 'lienchiang'],
   taipei: ['newtaipei'],
   newtaipei: ['taoyuan', 'yilan'],
   taoyuan: ['hsinchucounty', 'yilan'],
