@@ -206,6 +206,7 @@
           S.playerStarted = true;
           resetTurnActions();
           log(`🌅 第 ${S.day} 天，輪到你了！稅收 +${fmtMoney(inc)}`, 'me');
+          autoCustomSkills();
           // 自動選取老家（或任一己方縣市），招兵按鈕一開始就看得到
           if (!S.sel || S.owner[S.sel] !== S.player) S.sel = S.owner[S.player] === S.player ? S.player : owned(S.player)[0];
           render();
@@ -353,6 +354,7 @@
         : r.timeout ? `⏳ 時間到，${cTag(tgt)} 守住了（攻方損 ${r.lostA}、守方損 ${r.lostD}）`
         : `🛡️ ${cTag(tgt)} 擋下 ${fTag(fa)} 的進攻（攻方損 ${r.lostA}、守方損 ${r.lostD}）`, fd === S.player || fa === S.player ? 'me' : '');
     }
+    if (fa === S.player) autoCustomSkills([src]); // 「再出兵一次」類的自訂技能在出兵後發動
     render();
     checkEnd();
     await wait(0.5, gen);
@@ -791,6 +793,16 @@
     log(`🌟 ${by}：${detail}`, f === S.player ? 'me skill' : 'skill');
     return true;
   }
+  // 玩家的自訂技能自動發動：回合開始、剛設定好、出兵之後；不能發動（冷卻、兵滿、沒有敵方鄰居）就等下次
+  function autoCustomSkills(ids = owned(S.player)) {
+    if (S.mode !== 'play' || S.over) return;
+    const peace = S.day <= S.diff.playerPeace;
+    for (const id of ids) {
+      const key = S.owner[id] === S.player && slotsOf(id)[1];
+      if (!key || (peace && ALL_SKILLS[key].type === 'def')) continue; // 和平期不浪費防禦技能
+      useSkill(id, 1);
+    }
+  }
 
   // 技能設定視窗：只有自己縣市「空著」的自訂欄可以設定
   const canSetSkill = id => S.mode === 'play' && !S.over && S.owner[id] === S.player && !slotsOf(id)[1];
@@ -801,7 +813,7 @@
     $('#spTitle').innerHTML = captured ? `🚩 攻下 ${cTag(id)}！設定它的自訂技能` : `📜 設定 ${cTag(id)} 的自訂技能`;
     $('#spList').innerHTML = Object.entries(COMMON_SKILLS).map(([k, sk]) => `<button class="spItem" data-key="${k}">
         <span class="ricon">${sk.icon}</span><span><b>${sk.name}</b><small>${sk.desc}・冷卻 ${sk.cd} 天</small></span></button>`).join('');
-    $('#spHint').textContent = `固有技能「${REGION_SKILLS[id].icon} ${REGION_SKILLS[id].name}」不能換；自訂技能從 10 種裡選 1 種。設定後鎖定，要等這個縣市易主、被你重新佔領時才能重新設定。`;
+    $('#spHint').textContent = `固有技能「${REGION_SKILLS[id].icon} ${REGION_SKILLS[id].name}」不能換；自訂技能從 10 種裡選 1 種，冷卻好了會自動發動。設定後鎖定，要等這個縣市易主、被你重新佔領時才能重新設定。`;
     $('#skillPicker').hidden = false;
     return true;
   }
@@ -814,6 +826,7 @@
     S.slots[id][i] = b.dataset.key;
     $('#skillPicker').hidden = true;
     log(`📜 ${cTag(id)} 的技能欄裝上「${ALL_SKILLS[b.dataset.key].icon} ${ALL_SKILLS[b.dataset.key].name}」`, 'me');
+    if (playerActive()) autoCustomSkills([id]);
     render();
   });
   $('#spCancel').addEventListener('click', () => { $('#skillPicker').hidden = true; S.picker = null; });
@@ -1879,10 +1892,10 @@
     const canEdit = isMineSel && canSetSkill(id);
     html += slotsOf(id).map((key, i) => {
       const label = i === 0 ? '固有技能' : '自訂技能';
-      if (!key) return `<div class="rskill empty"><span class="ricon">➕</span><div class="rtext"><b>${label}（空）</b><small>${canEdit ? '從 10 種自訂技能挑一個，設定後鎖定到縣市易主' : '尚未設定'}</small></div>
+      if (!key) return `<div class="rskill empty"><span class="ricon">➕</span><div class="rtext"><b>${label}（空）</b><small>${canEdit ? '從 10 種自訂技能挑一個，冷卻好會自動發動，設定後鎖定到縣市易主' : '尚未設定'}</small></div>
         ${canEdit ? `<button data-pick="${i}">設定</button>` : ''}</div>`;
       const sk = ALL_SKILLS[key], block = skillBlock(id, i);
-      return `<div class="rskill"><span class="ricon">${sk.icon}</span><div class="rtext"><b>${label}：${sk.name}${i ? '<em>（易主時重新設定）</em>' : ''}</b><small>${sk.desc}（冷卻 ${sk.cd} 天）</small></div>
+      return `<div class="rskill"><span class="ricon">${sk.icon}</span><div class="rtext"><b>${label}：${sk.name}${i ? '<em>（自動發動・易主時重新設定）</em>' : ''}</b><small>${sk.desc}（冷卻 ${sk.cd} 天）</small></div>
         <div class="rbtns">${isMineSel ? `<button data-skill="${i}" ${block ? 'disabled' : ''}>${block || '發動'}</button>` : skillWait(id, i) ? `<span class="cdTag">冷卻 ${skillWait(id, i)} 天</span>` : ''}</div></div>`;
     }).join('') + (status.length ? `<div class="rstatus">${status.join('　')}</div>` : '');
     html += defenseHtml(id, isMineSel);

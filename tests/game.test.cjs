@@ -901,16 +901,53 @@ test('every county has a fixed regional skill plus one of ten custom skills', ()
   assert.equal(get('#spList').innerHTML.match(/data-key=/g).length, 10);
   assert.equal(h.openSkillPicker('tainan'), false, 'cannot edit an enemy county');
 });
-test('a custom skill locks once chosen and can be used like the regional one', () => {
+test('a custom skill locks once chosen and fires by itself as soon as it is set', () => {
   const { h, get } = fixture();
+  const money = h.S.money.taipei;
   h.openSkillPicker('taipei');
   pickSkill(get, 'c_build');
   assert.equal(h.S.slots.taipei[1], 'c_build');
   assert.equal(h.openSkillPicker('taipei'), false, 'locked until the county changes hands');
-  const money = h.S.money.taipei;
-  assert.ok(h.useSkill('taipei', 1));
-  assert.equal(h.S.money.taipei, money + 60);
+  assert.equal(h.S.money.taipei, money + 60, 'auto-cast on the player turn');
   assert.equal(h.useSkill('taipei', 1), false, 'custom slot has its own cooldown');
+});
+test('the player turn auto-casts ready custom skills but leaves the regional one alone', async () => {
+  const { h } = fixture();
+  h.S.slots.taipei = ['taipei', 'c_draft'];
+  h.S.army.taipei = { inf: 3 };
+  h.S.skillReady = {};
+  h.S.turnIdx = h.S.order.indexOf('taipei');
+  await h.runLoop(h.S.gen);
+  assert.equal(h.S.current, 'taipei');
+  assert.equal(h.S.army.taipei.inf, 6, 'c_draft recruited 3');
+  assert.equal(h.S.skillReady['taipei:1'], h.S.day + 3);
+  assert.equal(h.S.skillReady['taipei:0'], undefined, 'regional skill stays manual');
+});
+test('auto-cast skips defence skills during the player peace period', async () => {
+  const { h } = fixture();
+  h.S.slots.taipei = ['taipei', 'c_guard'];
+  h.S.skillReady = {};
+  h.S.diff = { ...h.S.diff, playerPeace: 5 };
+  h.S.day = 2;
+  h.S.turnIdx = h.S.order.indexOf('taipei');
+  await h.runLoop(h.S.gen);
+  assert.equal(h.S.skillReady['taipei:1'], undefined);
+  h.S.day = 6;
+  h.S.turnIdx = h.S.order.indexOf('taipei');
+  await h.runLoop(h.S.gen);
+  assert.equal(h.S.skillReady['taipei:1'], h.S.day + 3);
+  assert.equal(h.S.buff.taipei.def, 1.3);
+});
+test('an extra-attack custom skill fires right after that county attacks', async () => {
+  const f = fixture(), { h, get } = f;
+  h.S.slots.taipei = ['taipei', 'c_hsr'];
+  h.S.skillReady = {};
+  h.S.army.taipei = { inf: 10 }; h.S.army.newtaipei = { inf: 1 };
+  h.openAttack('taipei', 'newtaipei');
+  const confirm = get('#attackConfirm').handlers.click();
+  await f.flush(); await confirm;
+  assert.equal(h.S.acted.has('taipei'), false, 'can attack again today');
+  assert.equal(h.S.skillReady['taipei:1'], h.S.day + 4);
 });
 test('capturing a county clears its custom skill and asks the player to choose again', async () => {
   const f = fixture(), { h, get } = f;
